@@ -1,104 +1,66 @@
+/**
+ * water.ts handler
+ *
+ * Thin layer: extracts userId, calls waterService, returns response.
+ * Zero DynamoDB imports here.
+ */
 import { APIGatewayProxyHandler } from "aws-lambda";
-import { v4 as uuidv4 } from "uuid";
-import { DynamoDBClient } from "@aws-sdk/client-dynamodb";
 import {
-  DynamoDBDocumentClient,
-  PutCommand,
-  ScanCommand,
-  DeleteCommand,
-} from "@aws-sdk/lib-dynamodb";
-import { getOrganizationId } from "../utils/getUserId";
+  getAllWater,
+  createWater,
+  deleteWater,
+} from "../services/waterService";
+import { getUserId } from "../utils/getUserId";
+import {
+  ok,
+  created,
+  notFound,
+  badRequest,
+  unauthorized,
+  serverError,
+  isAuthError,
+} from "../utils/response";
 
-const client = new DynamoDBClient({});
-const db = DynamoDBDocumentClient.from(client);
-
-const TABLE = process.env.WATER_TABLE!;
-
+// GET /water
 export const getWater: APIGatewayProxyHandler = async (event) => {
   try {
-    const organizationId = getOrganizationId(event);
-
-    const data = await db.send(
-      new ScanCommand({
-        TableName: TABLE,
-        FilterExpression:
-          "attribute_not_exists(organizationId) OR organizationId = :orgId",
-        ExpressionAttributeValues: {
-          ":orgId": organizationId,
-        },
-      }),
-    );
-
-    return {
-      statusCode: 200,
-      body: JSON.stringify(data.Items || []),
-    };
-  } catch (err) {
+    const userId = getUserId(event);
+    const items = await getAllWater(userId);
+    return ok(items);
+  } catch (err: any) {
     console.error("getWater error:", err);
-    return {
-      statusCode: 500,
-      body: JSON.stringify({ message: "Failed to fetch water records" }),
-    };
+    return isAuthError(err) ? unauthorized(err.message) : serverError();
   }
 };
 
-export const createWater: APIGatewayProxyHandler = async (event) => {
+// POST /water
+export const createWater_: APIGatewayProxyHandler = async (event) => {
   try {
-    const body = JSON.parse(event.body || "{}");
-    const organizationId = getOrganizationId(event);
-
-    const item = {
-      id: uuidv4(),
-      organizationId,
-      source: body.source,
-      consumption: body.consumption,
-      date: body.date,
-      facility: body.facility,
-      notes: body.notes,
-      createdAt: new Date().toISOString(),
-    };
-
-    await db.send(
-      new PutCommand({
-        TableName: TABLE,
-        Item: item,
-      }),
-    );
-
-    return {
-      statusCode: 201,
-      body: JSON.stringify(item),
-    };
-  } catch (err) {
+    if (!event.body) return badRequest("Missing request body");
+    const userId = getUserId(event);
+    const data = JSON.parse(event.body);
+    const item = await createWater(userId, data);
+    return created(item);
+  } catch (err: any) {
     console.error("createWater error:", err);
-    return {
-      statusCode: 500,
-      body: JSON.stringify({ message: "Failed to create water record" }),
-    };
+    return isAuthError(err) ? unauthorized(err.message) : serverError();
   }
 };
 
-export const deleteWater: APIGatewayProxyHandler = async (event) => {
+// DELETE /water/{id}
+export const deleteWater_: APIGatewayProxyHandler = async (event) => {
   try {
     const id = event.pathParameters?.id;
+    if (!id) return badRequest("Missing id");
 
-    if (!id) {
-      return { statusCode: 400, body: "Missing id" };
-    }
-
-    await db.send(
-      new DeleteCommand({
-        TableName: TABLE,
-        Key: { id },
-      }),
-    );
-
-    return { statusCode: 200, body: JSON.stringify({ success: true }) };
-  } catch (err) {
+    const userId = getUserId(event);
+    await deleteWater(id, userId);
+    return ok({ success: true });
+  } catch (err: any) {
     console.error("deleteWater error:", err);
-    return {
-      statusCode: 500,
-      body: JSON.stringify({ message: "Failed to delete water record" }),
-    };
+    if (err.message === "Not found") return notFound();
+    return isAuthError(err) ? unauthorized(err.message) : serverError();
   }
 };
+
+export { createWater_ as createWater, deleteWater_ as deleteWater };

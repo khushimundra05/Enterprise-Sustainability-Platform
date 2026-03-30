@@ -1,15 +1,17 @@
+/**
+ * dynamo.ts
+ *
+ * Shared DynamoDB document client.
+ * Import `db` in every handler/service — do not create new clients per file.
+ */
 import { DynamoDBClient } from "@aws-sdk/client-dynamodb";
 import { DynamoDBDocumentClient } from "@aws-sdk/lib-dynamodb";
+import { REGION } from "../utils/env";
 
-const client = new DynamoDBClient({
-  region: process.env.AWS_REGION || process.env.AWS_REGION || "ap-south-1",
+const raw = new DynamoDBClient({ region: REGION });
+
+export const db = DynamoDBDocumentClient.from(raw, {
+  marshallOptions: {
+    removeUndefinedValues: true, // prevents errors when optional fields are missing
+  },
 });
-
-export const db = DynamoDBDocumentClient.from(client);
-
-// helper: put item
-export const putItem = async (table: string, item: any) => {
-  return db.send({
-    // using low-level send with PutCommand is preferred; keep db usage in handlers
-  } as any);
-};

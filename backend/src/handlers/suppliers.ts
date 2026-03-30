@@ -1,148 +1,94 @@
+/**
+ * suppliers.ts handler
+ *
+ * Thin layer: extracts userId, calls service, returns response.
+ * Zero DynamoDB imports here.
+ */
 import { APIGatewayProxyHandler } from "aws-lambda";
-import { db } from "../services/dynamo";
 import {
-  ScanCommand,
-  PutCommand,
-  DeleteCommand,
-  UpdateCommand,
-} from "@aws-sdk/lib-dynamodb";
-import { v4 as uuid } from "uuid";
-import { getUserId, getOrganizationId } from "../utils/getUserId";
+  getAllSuppliers,
+  createSupplier,
+  assessSupplier,
+  deleteSupplier,
+} from "../services/suppliersService";
+import { getUserId } from "../utils/getUserId";
+import {
+  ok,
+  created,
+  notFound,
+  badRequest,
+  unauthorized,
+  serverError,
+  isAuthError,
+  CSV_HEADERS,
+} from "../utils/response";
 
-const TABLE = process.env.SUPPLIERS_TABLE!;
-
-// GET SUPPLIERS (for org, scoped to current user id)
+// GET /suppliers
 export const getSuppliers: APIGatewayProxyHandler = async (event) => {
-  const userId = getUserId(event);
-  const organizationId = getOrganizationId(event);
-
-  const data = await db.send(
-    new ScanCommand({
-      TableName: TABLE,
-      FilterExpression:
-        "(attribute_not_exists(organizationId) OR organizationId = :orgId) AND userId = :uid",
-      ExpressionAttributeValues: {
-        ":uid": userId,
-        ":orgId": organizationId,
-      },
-    }),
-  );
-
-  return {
-    statusCode: 200,
-    body: JSON.stringify(data.Items || []),
-  };
-};
-
-// CREATE SUPPLIER
-export const createSupplier: APIGatewayProxyHandler = async (event) => {
-  const body = JSON.parse(event.body || "{}");
-
-  const userId = getUserId(event);
-  const organizationId = getOrganizationId(event);
-
-  const item = {
-    id: uuid(),
-    userId,
-    organizationId,
-    name: body.name,
-    category: body.category,
-    carbonFootprint: body.carbonFootprint || 0,
-    certifications: body.certifications || [],
-    riskScore: body.riskScore || 0,
-    lastAssessment: new Date().toISOString().slice(0, 10),
-  };
-
-  await db.send(
-    new PutCommand({
-      TableName: TABLE,
-      Item: item,
-    }),
-  );
-
-  return {
-    statusCode: 201,
-    body: JSON.stringify(item),
-  };
-};
-
-// DELETE SUPPLIER
-export const deleteSupplier: APIGatewayProxyHandler = async (event) => {
-  const id = event.pathParameters?.id;
-
-  if (!id) {
-    return {
-      statusCode: 400,
-      body: JSON.stringify({ message: "Missing supplier id" }),
-    };
+  try {
+    const userId = getUserId(event);
+    const items = await getAllSuppliers(userId);
+    return ok(items);
+  } catch (err: any) {
+    console.error("getSuppliers error:", err);
+    return isAuthError(err) ? unauthorized(err.message) : serverError();
   }
-
-  await db.send(
-    new DeleteCommand({
-      TableName: TABLE,
-      Key: { id },
-    }),
-  );
-
-  return {
-    statusCode: 200,
-    body: JSON.stringify({ message: "Supplier deleted" }),
-  };
 };
 
-// ASSESS SUPPLIER (update risk score)
-export const assessSupplier: APIGatewayProxyHandler = async (event) => {
-  const id = event.pathParameters?.id;
-  const body = JSON.parse(event.body || "{}");
-
-  if (!id) {
-    return {
-      statusCode: 400,
-      body: JSON.stringify({ message: "Missing supplier id" }),
-    };
+// POST /suppliers
+export const createSupplier_: APIGatewayProxyHandler = async (event) => {
+  try {
+    if (!event.body) return badRequest("Missing request body");
+    const userId = getUserId(event);
+    const data = JSON.parse(event.body);
+    const item = await createSupplier(userId, data);
+    return created(item);
+  } catch (err: any) {
+    console.error("createSupplier error:", err);
+    return isAuthError(err) ? unauthorized(err.message) : serverError();
   }
-
-  const riskScore = body.riskScore || 0;
-
-  await db.send(
-    new UpdateCommand({
-      TableName: TABLE,
-      Key: { id },
-      UpdateExpression: "SET riskScore = :r, lastAssessment = :d",
-      ExpressionAttributeValues: {
-        ":r": riskScore,
-        ":d": new Date().toISOString().slice(0, 10),
-      },
-    }),
-  );
-
-  return {
-    statusCode: 200,
-    body: JSON.stringify({ message: "Assessment updated" }),
-  };
 };
 
-// EXPORT SUPPLIERS (CSV)
+// PUT /suppliers/{id}/assess
+export const assessSupplier_: APIGatewayProxyHandler = async (event) => {
+  try {
+    const id = event.pathParameters?.id;
+    if (!id) return badRequest("Missing supplier id");
+
+    const userId = getUserId(event);
+    const body = JSON.parse(event.body || "{}");
+    await assessSupplier(id, userId, body.riskScore || 0);
+    return ok({ message: "Assessment updated" });
+  } catch (err: any) {
+    console.error("assessSupplier error:", err);
+    if (err.message === "Not found") return notFound();
+    return isAuthError(err) ? unauthorized(err.message) : serverError();
+  }
+};
+
+// DELETE /suppliers/{id}
+export const deleteSupplier_: APIGatewayProxyHandler = async (event) => {
+  try {
+    const id = event.pathParameters?.id;
+    if (!id) return badRequest("Missing supplier id");
+
+    const userId = getUserId(event);
+    await deleteSupplier(id, userId);
+    return ok({ message: "Supplier deleted" });
+  } catch (err: any) {
+    console.error("deleteSupplier error:", err);
+    if (err.message === "Not found") return notFound();
+    return isAuthError(err) ? unauthorized(err.message) : serverError();
+  }
+};
+
+// GET /suppliers/export
 export const exportSuppliers: APIGatewayProxyHandler = async (event) => {
   try {
     const userId = getUserId(event);
-    const organizationId = getOrganizationId(event);
+    const items = await getAllSuppliers(userId);
 
-    const data = await db.send(
-      new ScanCommand({
-        TableName: TABLE,
-        FilterExpression:
-          "(attribute_not_exists(organizationId) OR organizationId = :orgId) AND userId = :uid",
-        ExpressionAttributeValues: {
-          ":uid": userId,
-          ":orgId": organizationId,
-        },
-      }),
-    );
-
-    const items: any[] = data.Items || [];
-
-    const headers = [
+    const csvHeaders = [
       "name",
       "category",
       "location",
@@ -153,7 +99,7 @@ export const exportSuppliers: APIGatewayProxyHandler = async (event) => {
     ];
 
     const csv = [
-      headers.join(","),
+      csvHeaders.join(","),
       ...items.map((s) =>
         [
           s.name ?? "",
@@ -171,18 +117,18 @@ export const exportSuppliers: APIGatewayProxyHandler = async (event) => {
 
     return {
       statusCode: 200,
-      headers: {
-        "Content-Type": "text/csv",
-        "Content-Disposition": "attachment; filename=suppliers.csv",
-        "Access-Control-Allow-Origin": "*",
-      },
+      headers: CSV_HEADERS("suppliers.csv"),
       body: csv,
     };
-  } catch (err) {
+  } catch (err: any) {
     console.error("exportSuppliers error:", err);
-    return {
-      statusCode: 500,
-      body: JSON.stringify({ message: "Failed to export suppliers" }),
-    };
+    return isAuthError(err) ? unauthorized(err.message) : serverError();
   }
+};
+
+// Re-export with correct names matching serverless.yml
+export {
+  createSupplier_ as createSupplier,
+  assessSupplier_ as assessSupplier,
+  deleteSupplier_ as deleteSupplier,
 };

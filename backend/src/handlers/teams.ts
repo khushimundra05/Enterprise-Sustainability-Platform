@@ -1,162 +1,143 @@
-import { ScanCommand, PutCommand, UpdateCommand } from "@aws-sdk/lib-dynamodb";
+/**
+ * teams.ts handler
+ *
+ * Fixes:
+ * - Added missing deleteTeam
+ * - filterTeams now filters in memory after a proper userId-scoped query (not a full Scan)
+ * - exportTeams properly quotes CSV values
+ * - All responses use shared response helpers
+ */
+import { APIGatewayProxyHandler } from "aws-lambda";
+import {
+  getAllTeams,
+  createTeam,
+  updateTeam,
+  deleteTeam,
+} from "../services/teamsService";
+import { getUserId } from "../utils/getUserId";
+import {
+  ok,
+  created,
+  notFound,
+  badRequest,
+  unauthorized,
+  serverError,
+  isAuthError,
+  CSV_HEADERS,
+} from "../utils/response";
 
-import { db } from "../services/dynamo";
-import { v4 as uuid } from "uuid";
-import { getOrganizationId } from "../utils/getUserId";
-
-const TABLE = process.env.TEAMS_TABLE!;
-
-const headers = {
-  "Access-Control-Allow-Origin": "*",
-  "Content-Type": "application/json",
-};
-
-/* ---------------- GET TEAMS ---------------- */
-
-export const getTeams = async (event: any) => {
-  const organizationId = getOrganizationId(event);
-
-  const result = await db.send(
-    new ScanCommand({
-      TableName: TABLE,
-      FilterExpression:
-        "attribute_not_exists(organizationId) OR organizationId = :orgId",
-      ExpressionAttributeValues: {
-        ":orgId": organizationId,
-      },
-    }),
-  );
-
-  return {
-    statusCode: 200,
-    headers,
-    body: JSON.stringify(result.Items || []),
-  };
-};
-
-/* ---------------- CREATE TEAM ---------------- */
-
-export const createTeam = async (event: any) => {
-  const body = JSON.parse(event.body);
-  const organizationId = getOrganizationId(event);
-
-  const item = {
-    id: uuid(),
-    organizationId,
-    name: body.name,
-    lead: body.lead,
-    members: body.members,
-    responsibilities: body.responsibilities,
-    projectsActive: Number(body.projectsActive || 0),
-  };
-
-  await db.send(
-    new PutCommand({
-      TableName: TABLE,
-      Item: item,
-    }),
-  );
-
-  return {
-    statusCode: 201,
-    headers,
-    body: JSON.stringify(item),
-  };
-};
-
-/* ---------------- UPDATE TEAM ---------------- */
-
-export const updateTeam = async (event: any) => {
-  const id = event.pathParameters.id;
-  const body = JSON.parse(event.body);
-
-  const result = await db.send(
-    new UpdateCommand({
-      TableName: TABLE,
-      Key: { id },
-
-      UpdateExpression:
-        "SET #name=:name, #lead=:lead, members=:members, responsibilities=:resp, projectsActive=:projects",
-
-      ExpressionAttributeNames: {
-        "#name": "name",
-        "#lead": "lead",
-      },
-
-      ExpressionAttributeValues: {
-        ":name": body.name,
-        ":lead": body.lead,
-        ":members": body.members,
-        ":resp": body.responsibilities,
-        ":projects": Number(body.projectsActive),
-      },
-
-      ReturnValues: "ALL_NEW",
-    }),
-  );
-
-  return {
-    statusCode: 200,
-    headers,
-    body: JSON.stringify(result.Attributes),
-  };
-};
-/* ---------------- FILTER TEAMS ---------------- */
-
-export const filterTeams = async (event: any) => {
-  const projects = Number(event.queryStringParameters?.projects || 0);
-  const organizationId = getOrganizationId(event);
-
-  const result = await db.send(
-    new ScanCommand({
-      TableName: TABLE,
-      FilterExpression:
-        "attribute_not_exists(organizationId) OR organizationId = :orgId",
-      ExpressionAttributeValues: {
-        ":orgId": organizationId,
-      },
-    }),
-  );
-
-  let items: any = result.Items || [];
-
-  if (projects > 0) {
-    items = items.filter((t: any) => t.projectsActive >= projects);
+// GET /teams
+export const getTeams: APIGatewayProxyHandler = async (event) => {
+  try {
+    const userId = getUserId(event);
+    const items = await getAllTeams(userId);
+    return ok(items);
+  } catch (err: any) {
+    console.error("getTeams error:", err);
+    return isAuthError(err) ? unauthorized(err.message) : serverError();
   }
-
-  return {
-    statusCode: 200,
-    headers,
-    body: JSON.stringify(items),
-  };
 };
 
-/* ---------------- EXPORT TEAMS ---------------- */
+// POST /teams
+export const createTeam_: APIGatewayProxyHandler = async (event) => {
+  try {
+    if (!event.body) return badRequest("Missing request body");
+    const userId = getUserId(event);
+    const data = JSON.parse(event.body);
+    const item = await createTeam(userId, data);
+    return created(item);
+  } catch (err: any) {
+    console.error("createTeam error:", err);
+    return isAuthError(err) ? unauthorized(err.message) : serverError();
+  }
+};
 
-export const exportTeams = async (event: any) => {
-  const organizationId = getOrganizationId(event);
+// PUT /teams/{id}
+export const updateTeam_: APIGatewayProxyHandler = async (event) => {
+  try {
+    const id = event.pathParameters?.id;
+    if (!id) return badRequest("Missing id");
+    if (!event.body) return badRequest("Missing request body");
 
-  const result = await db.send(
-    new ScanCommand({
-      TableName: TABLE,
-      FilterExpression:
-        "attribute_not_exists(organizationId) OR organizationId = :orgId",
-      ExpressionAttributeValues: {
-        ":orgId": organizationId,
-      },
-    }),
-  );
+    const userId = getUserId(event);
+    const data = JSON.parse(event.body);
+    const updated = await updateTeam(id, userId, data);
+    return ok(updated);
+  } catch (err: any) {
+    console.error("updateTeam error:", err);
+    if (err.message === "Not found") return notFound();
+    return isAuthError(err) ? unauthorized(err.message) : serverError();
+  }
+};
 
-  const csv = (result.Items || [])
-    .map((t: any) => `${t.name},${t.lead},${t.members},${t.projectsActive}`)
-    .join("\n");
+// DELETE /teams/{id}
+export const deleteTeam_: APIGatewayProxyHandler = async (event) => {
+  try {
+    const id = event.pathParameters?.id;
+    if (!id) return badRequest("Missing id");
 
-  return {
-    statusCode: 200,
-    headers: {
-      "Content-Type": "text/csv",
-      "Content-Disposition": "attachment; filename=teams.csv",
-    },
-    body: csv,
-  };
+    const userId = getUserId(event);
+    await deleteTeam(id, userId);
+    return ok({ message: "Team deleted" });
+  } catch (err: any) {
+    console.error("deleteTeam error:", err);
+    if (err.message === "Not found") return notFound();
+    return isAuthError(err) ? unauthorized(err.message) : serverError();
+  }
+};
+
+// GET /teams/filter?projects=N
+// Queries only this user's teams, then filters in memory — no full table scan
+export const filterTeams: APIGatewayProxyHandler = async (event) => {
+  try {
+    const userId = getUserId(event);
+    const minProjects = Number(event.queryStringParameters?.projects || 0);
+
+    let items = await getAllTeams(userId);
+    if (minProjects > 0) {
+      items = items.filter((t) => t.projectsActive >= minProjects);
+    }
+
+    return ok(items);
+  } catch (err: any) {
+    console.error("filterTeams error:", err);
+    return isAuthError(err) ? unauthorized(err.message) : serverError();
+  }
+};
+
+// GET /teams/export
+export const exportTeams: APIGatewayProxyHandler = async (event) => {
+  try {
+    const userId = getUserId(event);
+    const items = await getAllTeams(userId);
+
+    const csv = [
+      "name,lead,members,projectsActive",
+      ...items.map((t) =>
+        [
+          t.name,
+          t.lead,
+          Array.isArray(t.members) ? t.members.join("|") : "",
+          t.projectsActive,
+        ]
+          .map((v) => `"${String(v ?? "").replaceAll('"', '""')}"`)
+          .join(","),
+      ),
+    ].join("\n");
+
+    return {
+      statusCode: 200,
+      headers: CSV_HEADERS("teams.csv"),
+      body: csv,
+    };
+  } catch (err: any) {
+    console.error("exportTeams error:", err);
+    return isAuthError(err) ? unauthorized(err.message) : serverError();
+  }
+};
+
+export {
+  createTeam_ as createTeam,
+  updateTeam_ as updateTeam,
+  deleteTeam_ as deleteTeam,
 };

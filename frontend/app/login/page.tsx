@@ -1,120 +1,140 @@
 "use client";
 
 import { useState } from "react";
-
-const REGION = "ap-south-1";
-const CLIENT_ID = "shrrsv0l5e490fdi3atps987t";
+import { useRouter } from "next/navigation";
+import { login as cognitoLogin, userPool } from "@/lib/auth";
+import { cognitoConfig } from "@/lib/cognito";
+import { CognitoUser, CognitoUserAttribute } from "amazon-cognito-identity-js";
 
 export default function LoginPage() {
+  const router = useRouter();
+
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [organization, setOrganization] = useState("");
   const [verificationCode, setVerificationCode] = useState("");
-
   const [mode, setMode] = useState<"login" | "signup">("login");
   const [showVerification, setShowVerification] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
-
   const [error, setError] = useState("");
+  const [loading, setLoading] = useState(false);
 
-  const [organization, setOrganization] = useState("");
-
-  async function login() {
+  // ── Login ──────────────────────────────────────────────────────
+  async function handleLogin() {
     setError("");
-
-    const res = await fetch(`https://cognito-idp.${REGION}.amazonaws.com/`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/x-amz-json-1.1",
-        "X-Amz-Target": "AWSCognitoIdentityProviderService.InitiateAuth",
-      },
-      body: JSON.stringify({
-        AuthFlow: "USER_PASSWORD_AUTH",
-        ClientId: CLIENT_ID,
-        AuthParameters: {
-          USERNAME: email,
-          PASSWORD: password,
-        },
-      }),
-    });
-
-    const data = await res.json();
-
-    if (data.AuthenticationResult) {
-      localStorage.setItem("token", data.AuthenticationResult.IdToken);
-      window.location.href = "/dashboard";
-    } else {
-      setError(data.message || "Incorrect username or password.");
+    setLoading(true);
+    try {
+      // cognitoLogin() from auth.ts stores idToken in sessionStorage["idToken"]
+      await cognitoLogin(email, password);
+      router.replace("/dashboard");
+    } catch (err: any) {
+      console.error("Login error:", err);
+      if (err.code === "UserNotConfirmedException") {
+        setError("Email not verified. Please check your inbox for the code.");
+        setShowVerification(true);
+        setMode("signup");
+      } else if (err.code === "NotAuthorizedException") {
+        setError("Incorrect email or password.");
+      } else if (err.code === "UserNotFoundException") {
+        setError("No account found with this email.");
+      } else {
+        setError(err.message || "Login failed. Please try again.");
+      }
+    } finally {
+      setLoading(false);
     }
   }
 
-  async function signup() {
+  // ── Sign up ────────────────────────────────────────────────────
+  async function handleSignup() {
     setError("");
+    setLoading(true);
+    try {
+      await new Promise<void>((resolve, reject) => {
+        const attributes = [
+          new CognitoUserAttribute({ Name: "email", Value: email }),
+        ];
 
-    const res = await fetch(`https://cognito-idp.${REGION}.amazonaws.com/`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/x-amz-json-1.1",
-        "X-Amz-Target": "AWSCognitoIdentityProviderService.SignUp",
-      },
-      body: JSON.stringify({
-        ClientId: CLIENT_ID,
-        Username: email,
-        Password: password,
-        UserAttributes: [
-          {
-            Name: "email",
-            Value: email,
-          },
-          {
-            Name: "custom:Organisation",
-            Value: organization,
-          },
-        ],
-      }),
-    });
+        if (organization) {
+          attributes.push(
+            new CognitoUserAttribute({
+              Name: "custom:Organisation",
+              Value: organization,
+            }),
+          );
+        }
 
-    const data = await res.json();
+        userPool.signUp(email, password, attributes, [], (err, result) => {
+          if (err) {
+            reject(err);
+            return;
+          }
+          resolve();
+        });
+      });
 
-    if (data.UserSub) {
-      alert("Verification code sent to your email.");
       setShowVerification(true);
-    } else {
-      setError(data.message || "Signup failed.");
+      setError("");
+      alert("Verification code sent to your email.");
+    } catch (err: any) {
+      console.error("Signup error:", err);
+      if (err.code === "UsernameExistsException") {
+        setError("An account with this email already exists.");
+      } else if (err.code === "InvalidPasswordException") {
+        setError(
+          "Password must be at least 8 characters with uppercase, lowercase, and a number.",
+        );
+      } else {
+        setError(err.message || "Signup failed. Please try again.");
+      }
+    } finally {
+      setLoading(false);
     }
   }
 
-  async function verifyCode() {
+  // ── Verify email ───────────────────────────────────────────────
+  async function handleVerify() {
     setError("");
+    setLoading(true);
+    try {
+      await new Promise<void>((resolve, reject) => {
+        const cognitoUser = new CognitoUser({
+          Username: email,
+          Pool: userPool,
+        });
 
-    const res = await fetch(`https://cognito-idp.${REGION}.amazonaws.com/`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/x-amz-json-1.1",
-        "X-Amz-Target": "AWSCognitoIdentityProviderService.ConfirmSignUp",
-      },
-      body: JSON.stringify({
-        ClientId: CLIENT_ID,
-        Username: email,
-        ConfirmationCode: verificationCode,
-      }),
-    });
+        cognitoUser.confirmRegistration(verificationCode, true, (err) => {
+          if (err) {
+            reject(err);
+            return;
+          }
+          resolve();
+        });
+      });
 
-    const data = await res.json();
-
-    if (!data.__type) {
-      alert("Email verified! You can now login.");
+      alert("Email verified! You can now log in.");
       setShowVerification(false);
       setMode("login");
-    } else {
-      setError(data.message || "Verification failed.");
+      setVerificationCode("");
+    } catch (err: any) {
+      console.error("Verify error:", err);
+      if (err.code === "CodeMismatchException") {
+        setError("Invalid verification code. Please check and try again.");
+      } else if (err.code === "ExpiredCodeException") {
+        setError("Code expired. Please sign up again to get a new code.");
+      } else {
+        setError(err.message || "Verification failed.");
+      }
+    } finally {
+      setLoading(false);
     }
   }
 
-  function submit(e: any) {
+  function submit(e: React.FormEvent) {
     e.preventDefault();
-
-    if (mode === "login") login();
-    else signup();
+    if (showVerification) return; // handled by separate button
+    if (mode === "login") handleLogin();
+    else handleSignup();
   }
 
   return (
@@ -127,7 +147,11 @@ export default function LoginPage() {
           SustainHub {mode === "login" ? "Login" : "Sign Up"}
         </h1>
 
-        {error && <p className="text-red-500 text-sm text-center">{error}</p>}
+        {error && (
+          <p className="text-red-500 text-sm text-center bg-red-50 border border-red-200 rounded p-2">
+            {error}
+          </p>
+        )}
 
         <input
           type="email"
@@ -138,24 +162,25 @@ export default function LoginPage() {
           required
         />
 
-        <input
-          type="text"
-          placeholder="Organization Name"
-          className="w-full border p-3 rounded"
-          value={organization}
-          onChange={(e) => setOrganization(e.target.value)}
-        />
+        {mode === "signup" && (
+          <input
+            type="text"
+            placeholder="Organization Name"
+            className="w-full border p-3 rounded"
+            value={organization}
+            onChange={(e) => setOrganization(e.target.value)}
+          />
+        )}
 
         <div className="relative">
           <input
             type={showPassword ? "text" : "password"}
             placeholder="Password"
-            className="w-full border p-3 rounded"
+            className="w-full border p-3 rounded pr-16"
             value={password}
             onChange={(e) => setPassword(e.target.value)}
             required
           />
-
           <button
             type="button"
             onClick={() => setShowPassword(!showPassword)}
@@ -166,29 +191,41 @@ export default function LoginPage() {
         </div>
 
         {showVerification && (
-          <input
-            type="text"
-            placeholder="Verification Code"
-            className="w-full border p-3 rounded"
-            value={verificationCode}
-            onChange={(e) => setVerificationCode(e.target.value)}
-          />
+          <div className="space-y-2">
+            <p className="text-sm text-gray-600">
+              Check your email for a verification code.
+            </p>
+            <input
+              type="text"
+              placeholder="Verification Code"
+              className="w-full border p-3 rounded"
+              value={verificationCode}
+              onChange={(e) => setVerificationCode(e.target.value)}
+            />
+            <button
+              type="button"
+              onClick={handleVerify}
+              disabled={loading}
+              className="w-full bg-blue-600 text-white py-3 rounded hover:bg-blue-700 disabled:opacity-50"
+            >
+              {loading ? "Verifying..." : "Verify Email"}
+            </button>
+          </div>
         )}
 
-        {showVerification ? (
-          <button
-            type="button"
-            onClick={verifyCode}
-            className="w-full bg-blue-600 text-white py-3 rounded hover:bg-blue-700"
-          >
-            Verify Email
-          </button>
-        ) : (
+        {!showVerification && (
           <button
             type="submit"
-            className="w-full bg-green-600 text-white py-3 rounded hover:bg-green-700"
+            disabled={loading}
+            className="w-full bg-green-600 text-white py-3 rounded hover:bg-green-700 disabled:opacity-50"
           >
-            {mode === "login" ? "Login" : "Create Account"}
+            {loading
+              ? mode === "login"
+                ? "Logging in..."
+                : "Creating account..."
+              : mode === "login"
+                ? "Login"
+                : "Create Account"}
           </button>
         )}
 
@@ -197,8 +234,11 @@ export default function LoginPage() {
             Don't have an account?{" "}
             <button
               type="button"
-              className="text-green-600"
-              onClick={() => setMode("signup")}
+              className="text-green-600 underline"
+              onClick={() => {
+                setMode("signup");
+                setError("");
+              }}
             >
               Sign Up
             </button>
@@ -208,10 +248,11 @@ export default function LoginPage() {
             Already have an account?{" "}
             <button
               type="button"
-              className="text-green-600"
+              className="text-green-600 underline"
               onClick={() => {
                 setMode("login");
                 setShowVerification(false);
+                setError("");
               }}
             >
               Login

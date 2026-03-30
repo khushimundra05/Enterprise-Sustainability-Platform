@@ -10,24 +10,46 @@ import {
 } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Plus, Download, Filter, TrendingUp, Target } from "lucide-react";
-
+import { Plus, Download, TrendingUp, Target } from "lucide-react";
 import api, { Goal, Emission, EnergyRecord } from "@/lib/api";
 import AddGoalModal from "@/components/add-goal-modal";
 
 export default function GoalsPage() {
   const [goals, setGoals] = useState<Goal[]>([]);
-  const [filteredGoals, setFilteredGoals] = useState<Goal[]>([]);
   const [filterCategory, setFilterCategory] = useState("all");
-
   const [goalModalOpen, setGoalModalOpen] = useState(false);
-
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const [metrics, setMetrics] = useState<{
     emissions: Emission[];
     energy: EnergyRecord[];
-  }>({ emissions: [], energy: [] });
+  }>({
+    emissions: [],
+    energy: [],
+  });
   const [autoUpdated, setAutoUpdated] = useState(false);
+
+  // ── Data loading ───────────────────────────────────────────────
+  async function loadGoals() {
+    setLoading(true);
+    setError(null);
+    try {
+      const data = await api.getGoals();
+      setGoals(data || []);
+    } catch (err: any) {
+      console.error("loadGoals failed:", err);
+      if (
+        err.message?.includes("401") ||
+        err.message?.includes("Not authenticated")
+      ) {
+        setError("Session expired — please log out and log back in.");
+      } else {
+        setError("Failed to load goals. Is the backend running?");
+      }
+    } finally {
+      setLoading(false);
+    }
+  }
 
   useEffect(() => {
     loadGoals();
@@ -42,29 +64,18 @@ export default function GoalsPage() {
         ]);
         setMetrics({ emissions: emissions || [], energy: energy || [] });
       } catch (err) {
+        // metrics are optional for display purposes — don't block the page
         console.error("Failed to load metrics for goals", err);
       }
     }
     loadMetrics();
   }, []);
 
-  useEffect(() => {
-    if (filterCategory === "all") {
-      setFilteredGoals(goals);
-    } else {
-      setFilteredGoals(goals.filter((g) => g.category === filterCategory));
-    }
+  // ── Derived values ─────────────────────────────────────────────
+  const filteredGoals = useMemo(() => {
+    if (filterCategory === "all") return goals;
+    return goals.filter((g) => g.category === filterCategory);
   }, [goals, filterCategory]);
-
-  async function loadGoals() {
-    setLoading(true);
-
-    const data = await api.getGoals();
-
-    setGoals(data || []);
-
-    setLoading(false);
-  }
 
   const aggregated = useMemo(() => {
     const totalEmissions = metrics.emissions.reduce(
@@ -78,15 +89,13 @@ export default function GoalsPage() {
     const renewableEnergy = metrics.energy
       .filter((r) => r.source?.toLowerCase().includes("renewable"))
       .reduce((sum, r) => sum + (r.consumption || 0), 0);
-
     const renewableShare =
       totalEnergy > 0 ? Math.round((renewableEnergy / totalEnergy) * 100) : 0;
-
     return { totalEmissions, totalEnergy, renewableShare };
   }, [metrics]);
 
+  // ── Auto-progress model (runs once when data is ready) ─────────
   useEffect(() => {
-    // simple placeholder “ML” progression model; only run once when data is ready
     if (autoUpdated || goals.length === 0) return;
     if (!metrics.emissions.length && !metrics.energy.length) return;
 
@@ -96,38 +105,21 @@ export default function GoalsPage() {
           let progress = g.progress;
 
           if (g.category === "carbon") {
-            // assume target is reduction vs current total emissions
             const baseline = aggregated.totalEmissions || 1;
-            const targetReduction = g.target || 0;
-            const achieved = Math.min(
-              (targetReduction / baseline) * 100,
-              100,
-            );
-            progress = Math.round(achieved);
+            progress = Math.round(Math.min((g.target / baseline) * 100, 100));
           } else if (g.category === "energy") {
-            // map progress to renewable share vs target %
             const targetShare = g.target || 100;
             if (targetShare > 0) {
-              const achieved = Math.min(
-                (aggregated.renewableShare / targetShare) * 100,
-                100,
+              progress = Math.round(
+                Math.min((aggregated.renewableShare / targetShare) * 100, 100),
               );
-              progress = Math.round(achieved);
             }
           }
 
-          let status: Goal["status"] = "on-track";
-          if (progress < 40) status = "behind";
-          else if (progress < 70) status = "at-risk";
-
-          return { id: g.id!, progress, status };
+          return { id: g.id!, progress };
         });
 
-        await Promise.all(
-          updates.map((u) => api.updateGoal(u.id, u.progress)),
-        );
-
-        // refresh goals with updated progress
+        await Promise.all(updates.map((u) => api.updateGoal(u.id, u.progress)));
         await loadGoals();
       } catch (err) {
         console.error("Auto-progress update failed", err);
@@ -139,6 +131,7 @@ export default function GoalsPage() {
     updateFromModel();
   }, [goals, metrics, aggregated, autoUpdated]);
 
+  // ── Handlers ───────────────────────────────────────────────────
   function exportGoals() {
     const csv = [
       ["Title", "Category", "Target", "Unit", "Progress", "Deadline"],
@@ -156,63 +149,47 @@ export default function GoalsPage() {
 
     const blob = new Blob([csv]);
     const url = URL.createObjectURL(blob);
-
     const a = document.createElement("a");
     a.href = url;
     a.download = "goals.csv";
     a.click();
+    URL.revokeObjectURL(url);
   }
 
   async function editProgress(id: string) {
-    const progress = prompt("Enter new progress %");
-
-    if (!progress) return;
-
-    await api.updateGoal(id, Number(progress));
-
-    loadGoals();
+    const input = prompt("Enter new progress %");
+    if (!input) return;
+    try {
+      await api.updateGoal(id, Number(input));
+      await loadGoals();
+    } catch (err: any) {
+      alert(err.message || "Failed to update progress");
+    }
   }
 
+  // ── Stats ──────────────────────────────────────────────────────
   const onTrack = goals.filter((g) => g.status === "on-track").length;
   const atRisk = goals.filter((g) => g.status === "at-risk").length;
   const behind = goals.filter((g) => g.status === "behind").length;
 
-  const getStatusColor = (status: string) => {
-    switch (status) {
-      case "on-track":
-        return "bg-green-100 text-green-700";
+  const statusColor = (status: string) =>
+    ({
+      "on-track": "bg-green-100 text-green-700",
+      "at-risk": "bg-yellow-100 text-yellow-700",
+      behind: "bg-red-100 text-red-700",
+    })[status] ?? "bg-gray-100 text-gray-700";
 
-      case "at-risk":
-        return "bg-yellow-100 text-yellow-700";
+  const statusLabel = (status: string) =>
+    ({
+      "on-track": "On Track",
+      "at-risk": "At Risk",
+      behind: "Behind",
+    })[status] ?? status;
 
-      case "behind":
-        return "bg-red-100 text-red-700";
-
-      default:
-        return "bg-gray-100 text-gray-700";
-    }
-  };
-
-  const getStatusLabel = (status: string) => {
-    switch (status) {
-      case "on-track":
-        return "On Track";
-
-      case "at-risk":
-        return "At Risk";
-
-      case "behind":
-        return "Behind";
-
-      default:
-        return status;
-    }
-  };
-
+  // ── Render ─────────────────────────────────────────────────────
   return (
     <div className="space-y-6">
-      {/* HEADER */}
-
+      {/* Header */}
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-3xl font-bold">Goals & Targets</h1>
@@ -220,7 +197,6 @@ export default function GoalsPage() {
             Track sustainability targets and team progress
           </p>
         </div>
-
         <div className="flex gap-2">
           <select
             className="border rounded p-2"
@@ -232,7 +208,6 @@ export default function GoalsPage() {
             <option value="energy">Energy</option>
             <option value="waste">Waste</option>
           </select>
-
           <Button
             variant="outline"
             className="gap-2 bg-transparent"
@@ -240,7 +215,6 @@ export default function GoalsPage() {
           >
             <Download className="h-4 w-4" /> Export
           </Button>
-
           <Button
             className="bg-green-600 hover:bg-green-700 gap-2"
             onClick={() => setGoalModalOpen(true)}
@@ -250,71 +224,73 @@ export default function GoalsPage() {
         </div>
       </div>
 
-      {/* KPI */}
-
+      {/* KPI cards */}
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium text-gray-600">
-              Total Goals
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="text-3xl font-bold">{goals.length}</div>
-            <p className="text-xs text-gray-500 mt-2">
-              Active sustainability goals
-            </p>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium text-gray-600">
-              On Track
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="text-3xl font-bold">{onTrack}</div>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium text-gray-600">
-              At Risk
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="text-3xl font-bold">{atRisk}</div>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium text-gray-600">
-              Behind Schedule
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="text-3xl font-bold">{behind}</div>
-          </CardContent>
-        </Card>
+        {[
+          {
+            label: "Total Goals",
+            value: goals.length,
+            sub: "Active sustainability goals",
+          },
+          { label: "On Track", value: onTrack },
+          { label: "At Risk", value: atRisk },
+          { label: "Behind Schedule", value: behind },
+        ].map(({ label, value, sub }) => (
+          <Card key={label}>
+            <CardHeader className="pb-2">
+              <CardTitle className="text-sm font-medium text-gray-600">
+                {label}
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="text-3xl font-bold">{value}</div>
+              {sub && <p className="text-xs text-gray-500 mt-2">{sub}</p>}
+            </CardContent>
+          </Card>
+        ))}
       </div>
 
-      {/* GOALS */}
-
+      {/* Goals list */}
       <Card>
         <CardHeader>
           <CardTitle>Organizational Goals</CardTitle>
           <CardDescription>Long-term sustainability targets</CardDescription>
         </CardHeader>
-
         <CardContent className="space-y-6">
-          {loading && <p>Loading goals...</p>}
+          {/* Error state */}
+          {error && (
+            <div className="bg-red-50 border border-red-200 text-red-700 text-sm px-4 py-3 rounded flex items-center justify-between">
+              <span>{error}</span>
+              <Button variant="outline" size="sm" onClick={loadGoals}>
+                Retry
+              </Button>
+            </div>
+          )}
 
+          {/* Loading state */}
+          {loading && !error && (
+            <div className="text-gray-500 text-sm py-4 text-center">
+              Loading goals...
+            </div>
+          )}
+
+          {/* Empty state */}
+          {!loading && !error && filteredGoals.length === 0 && (
+            <div className="text-gray-400 text-sm py-8 text-center">
+              No goals yet.{" "}
+              <button
+                className="text-green-600 underline"
+                onClick={() => setGoalModalOpen(true)}
+              >
+                Create your first goal
+              </button>
+            </div>
+          )}
+
+          {/* Goal rows */}
           {filteredGoals.map((goal) => {
             const yearsRemaining = Math.ceil(
-              (new Date(goal.deadline).getTime() - new Date().getTime()) /
+              (new Date(goal.deadline).getTime() - Date.now()) /
                 (1000 * 60 * 60 * 24 * 365),
             );
 
@@ -325,9 +301,8 @@ export default function GoalsPage() {
                     <Target className="h-5 w-5 text-green-600" />
                     <h3 className="text-lg font-semibold">{goal.title}</h3>
                   </div>
-
-                  <Badge className={getStatusColor(goal.status)}>
-                    {getStatusLabel(goal.status)}
+                  <Badge className={statusColor(goal.status)}>
+                    {statusLabel(goal.status)}
                   </Badge>
                 </div>
 
@@ -337,8 +312,8 @@ export default function GoalsPage() {
 
                 <div className="w-full bg-gray-200 rounded-full h-3">
                   <div
-                    className="h-3 bg-green-600 rounded-full"
-                    style={{ width: `${goal.progress}%` }}
+                    className="h-3 bg-green-600 rounded-full transition-all"
+                    style={{ width: `${Math.min(goal.progress, 100)}%` }}
                   />
                 </div>
 
@@ -346,15 +321,12 @@ export default function GoalsPage() {
                   <div>
                     Category: <b>{goal.category}</b>
                   </div>
-
                   <div>
                     Years Remaining: <b>{yearsRemaining}</b>
                   </div>
-
                   <div>
                     Progress: <b>{goal.progress}%</b>
                   </div>
-
                   <Button
                     variant="outline"
                     size="sm"
@@ -369,8 +341,7 @@ export default function GoalsPage() {
         </CardContent>
       </Card>
 
-      {/* ACTIONS */}
-
+      {/* Recommended actions */}
       <Card>
         <CardHeader>
           <CardTitle>Recommended Actions</CardTitle>
@@ -378,22 +349,20 @@ export default function GoalsPage() {
             Steps to accelerate progress toward goals
           </CardDescription>
         </CardHeader>
-
         <CardContent className="space-y-3">
-          <div className="p-3 border rounded-lg">
-            <TrendingUp className="inline mr-2 text-green-600" />
-            Accelerate renewable energy deployment
-          </div>
-
-          <div className="p-3 border rounded-lg">
-            <TrendingUp className="inline mr-2 text-yellow-600" />
-            Strengthen waste reduction initiatives
-          </div>
-
-          <div className="p-3 border rounded-lg">
-            <TrendingUp className="inline mr-2 text-green-600" />
-            Supply chain carbon accounting
-          </div>
+          {[
+            { icon: "green", text: "Accelerate renewable energy deployment" },
+            { icon: "yellow", text: "Strengthen waste reduction initiatives" },
+            { icon: "green", text: "Supply chain carbon accounting" },
+          ].map(({ icon, text }) => (
+            <div
+              key={text}
+              className="p-3 border rounded-lg flex items-center gap-2"
+            >
+              <TrendingUp className={`h-4 w-4 text-${icon}-600`} />
+              {text}
+            </div>
+          ))}
         </CardContent>
       </Card>
 

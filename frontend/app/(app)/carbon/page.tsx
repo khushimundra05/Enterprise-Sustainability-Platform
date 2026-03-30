@@ -24,20 +24,34 @@ import {
 import { Plus, Download } from "lucide-react";
 import api, { Emission as EmissionType } from "@/lib/api";
 
+const MONTH_ORDER = [
+  "Jan",
+  "Feb",
+  "Mar",
+  "Apr",
+  "May",
+  "Jun",
+  "Jul",
+  "Aug",
+  "Sep",
+  "Oct",
+  "Nov",
+  "Dec",
+];
+
 export default function CarbonPage() {
   const [emissions, setEmissions] = useState<EmissionType[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [openModal, setOpenModal] = useState(false);
-
   const [sourceFilter, setSourceFilter] = useState("all");
   const [fromDate, setFromDate] = useState("");
   const [toDate, setToDate] = useState("");
 
   async function loadEmissions() {
+    setLoading(true);
+    setError(null);
     try {
-      setLoading(true);
-      setError(null);
       const data = await api.getEmissions();
       setEmissions(data || []);
     } catch (err: any) {
@@ -51,7 +65,6 @@ export default function CarbonPage() {
     loadEmissions();
   }, []);
 
-  // ✅ FILTERED DATA
   const filteredEmissions = emissions.filter((e) => {
     if (sourceFilter !== "all" && e.source !== sourceFilter) return false;
     if (fromDate && e.date < fromDate) return false;
@@ -59,87 +72,55 @@ export default function CarbonPage() {
     return true;
   });
 
-  // ✅ DELETE
   async function handleDelete(id: string) {
     if (!confirm("Delete this emission?")) return;
     try {
       await api.deleteEmission(id);
       await loadEmissions();
-    } catch {
-      alert("Delete failed");
+    } catch (err: any) {
+      alert(err.message || "Delete failed");
     }
   }
 
-  // ✅ KPI CALCULATIONS (filtered)
   const totalEmissions = filteredEmissions.reduce(
-    (sum, e) => sum + (e.amount || 0),
-    0
+    (s, e) => s + (e.amount || 0),
+    0,
   );
-
   const monthlyAverage =
     filteredEmissions.length > 0
       ? totalEmissions / filteredEmissions.length
       : 0;
 
-  // ✅ MONTHLY TREND (filtered)
   const monthlyMap: Record<string, number> = {};
   filteredEmissions.forEach((e) => {
     if (!e.date) return;
-    const month = new Date(e.date).toLocaleString("default", {
-      month: "short",
-    });
-    monthlyMap[month] = (monthlyMap[month] || 0) + (e.amount || 0);
+    const m = new Date(e.date).toLocaleString("default", { month: "short" });
+    monthlyMap[m] = (monthlyMap[m] || 0) + (e.amount || 0);
   });
+  const monthlyData = MONTH_ORDER.filter((m) => monthlyMap[m]).map((m) => ({
+    month: m,
+    emissions: monthlyMap[m],
+  }));
 
-  const monthOrder = [
-    "Jan","Feb","Mar","Apr","May","Jun",
-    "Jul","Aug","Sep","Oct","Nov","Dec"
-  ];
-
-  const monthlyData = Object.entries(monthlyMap)
-    .map(([month, emissions]) => ({ month, emissions }))
-    .sort(
-      (a, b) =>
-        monthOrder.indexOf(a.month) - monthOrder.indexOf(b.month)
-    );
-
-  // ✅ SOURCE BREAKDOWN (filtered)
   const sourceMap: Record<string, number> = {};
   filteredEmissions.forEach((e) => {
-    if (!e.source) return;
-    sourceMap[e.source] = (sourceMap[e.source] || 0) + (e.amount || 0);
+    if (e.source)
+      sourceMap[e.source] = (sourceMap[e.source] || 0) + (e.amount || 0);
   });
-
   const sourceData = Object.entries(sourceMap).map(([source, value]) => ({
     source,
     value,
   }));
 
-  // ✅ CSV EXPORT
   function exportCSV() {
     if (!filteredEmissions.length) return;
-
-    const headers = ["Date", "Source", "Facility", "Amount", "Notes"];
-    const rows = filteredEmissions.map((e) => [
-      e.date,
-      e.source,
-      e.facility || "",
-      e.amount,
-      e.notes || "",
-    ]);
-
-    const csvContent = [headers, ...rows]
-      .map((row) => row.join(","))
-      .join("\n");
-
-    const blob = new Blob([csvContent], {
-      type: "text/csv;charset=utf-8;",
-    });
-
-    const url = URL.createObjectURL(blob);
+    const rows = filteredEmissions.map((e) =>
+      [e.date, e.source, e.facility || "", e.amount, e.notes || ""].join(","),
+    );
+    const csv = ["Date,Source,Facility,Amount,Notes", ...rows].join("\n");
     const link = document.createElement("a");
-    link.href = url;
-    link.setAttribute("download", "emissions.csv");
+    link.href = URL.createObjectURL(new Blob([csv], { type: "text/csv" }));
+    link.download = "emissions.csv";
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
@@ -147,7 +128,7 @@ export default function CarbonPage() {
 
   return (
     <div className="space-y-6">
-      {/* HEADER */}
+      {/* Header */}
       <div className="flex items-start justify-between gap-4 flex-wrap">
         <div>
           <h1 className="text-3xl font-bold">Carbon Emissions</h1>
@@ -155,7 +136,6 @@ export default function CarbonPage() {
             Track and manage carbon footprint across all operations
           </p>
         </div>
-
         <div className="flex items-center gap-2 flex-wrap">
           <select
             className="border rounded px-2 py-1 text-sm"
@@ -167,21 +147,18 @@ export default function CarbonPage() {
             <option value="Transportation">Transportation</option>
             <option value="Supply Chain">Supply Chain</option>
           </select>
-
           <input
             type="date"
             className="border rounded px-2 py-1 text-sm"
             value={fromDate}
             onChange={(e) => setFromDate(e.target.value)}
           />
-
           <input
             type="date"
             className="border rounded px-2 py-1 text-sm"
             value={toDate}
             onChange={(e) => setToDate(e.target.value)}
           />
-
           <Button
             variant="outline"
             onClick={exportCSV}
@@ -189,10 +166,8 @@ export default function CarbonPage() {
           >
             <Download className="h-4 w-4" /> Export
           </Button>
-
           <Button
             onClick={() => setOpenModal(true)}
-            disabled={loading}
             className="bg-green-600 hover:bg-green-700 gap-2"
           >
             <Plus className="h-4 w-4" /> Log Emission
@@ -200,7 +175,17 @@ export default function CarbonPage() {
         </div>
       </div>
 
-      {/* KPI */}
+      {/* Error */}
+      {error && (
+        <div className="bg-red-50 border border-red-200 text-red-700 text-sm px-4 py-3 rounded flex justify-between">
+          <span>{error}</span>
+          <button onClick={loadEmissions} className="underline">
+            Retry
+          </button>
+        </div>
+      )}
+
+      {/* KPIs */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         <Card>
           <CardHeader className="pb-2">
@@ -212,9 +197,9 @@ export default function CarbonPage() {
             <div className="text-3xl font-bold">
               {totalEmissions.toLocaleString()}
             </div>
+            <p className="text-xs text-gray-500 mt-1">kg CO₂e</p>
           </CardContent>
         </Card>
-
         <Card>
           <CardHeader className="pb-2">
             <CardTitle className="text-sm font-medium text-gray-600">
@@ -225,70 +210,81 @@ export default function CarbonPage() {
             <div className="text-3xl font-bold">
               {monthlyAverage.toFixed(0)}
             </div>
+            <p className="text-xs text-gray-500 mt-1">kg CO₂e</p>
           </CardContent>
         </Card>
-
         <Card>
           <CardHeader className="pb-2">
             <CardTitle className="text-sm font-medium text-gray-600">
-              Offset Status
+              Records Logged
             </CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="text-3xl font-bold">42%</div>
+            <div className="text-3xl font-bold">{filteredEmissions.length}</div>
+            <p className="text-xs text-gray-500 mt-1">entries</p>
           </CardContent>
         </Card>
       </div>
 
-      {/* CHARTS */}
+      {/* Charts */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         <Card>
           <CardHeader>
             <CardTitle>Emissions by Source</CardTitle>
           </CardHeader>
           <CardContent>
-            <ResponsiveContainer width="100%" height={300}>
-              <BarChart data={sourceData}>
-                <CartesianGrid strokeDasharray="3 3" />
-                <XAxis dataKey="source" />
-                <YAxis />
-                <Tooltip />
-                <Bar dataKey="value" fill="#10b981" />
-              </BarChart>
-            </ResponsiveContainer>
+            {sourceData.length === 0 ? (
+              <div className="h-[300px] flex items-center justify-center text-gray-400 text-sm">
+                No data yet
+              </div>
+            ) : (
+              <ResponsiveContainer width="100%" height={300}>
+                <BarChart data={sourceData}>
+                  <CartesianGrid strokeDasharray="3 3" />
+                  <XAxis dataKey="source" />
+                  <YAxis />
+                  <Tooltip />
+                  <Bar dataKey="value" fill="#10b981" />
+                </BarChart>
+              </ResponsiveContainer>
+            )}
           </CardContent>
         </Card>
-
         <Card>
           <CardHeader>
             <CardTitle>Monthly Trend</CardTitle>
           </CardHeader>
           <CardContent>
-            <ResponsiveContainer width="100%" height={300}>
-              <LineChart data={monthlyData}>
-                <CartesianGrid strokeDasharray="3 3" />
-                <XAxis dataKey="month" />
-                <YAxis />
-                <Tooltip />
-                <Line
-                  type="monotone"
-                  dataKey="emissions"
-                  stroke="#059669"
-                  strokeWidth={2}
-                />
-              </LineChart>
-            </ResponsiveContainer>
+            {monthlyData.length === 0 ? (
+              <div className="h-[300px] flex items-center justify-center text-gray-400 text-sm">
+                No data yet
+              </div>
+            ) : (
+              <ResponsiveContainer width="100%" height={300}>
+                <LineChart data={monthlyData}>
+                  <CartesianGrid strokeDasharray="3 3" />
+                  <XAxis dataKey="month" />
+                  <YAxis />
+                  <Tooltip />
+                  <Line
+                    type="monotone"
+                    dataKey="emissions"
+                    stroke="#059669"
+                    strokeWidth={2}
+                  />
+                </LineChart>
+              </ResponsiveContainer>
+            )}
           </CardContent>
         </Card>
       </div>
 
-      {/* TABLE */}
+      {/* Table */}
       <Card>
         <CardHeader>
           <CardTitle>Recent Emissions Log</CardTitle>
           <CardDescription>Latest entries</CardDescription>
         </CardHeader>
-
         <CardContent>
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
@@ -302,17 +298,30 @@ export default function CarbonPage() {
                   <th className="text-right py-3 px-4">Actions</th>
                 </tr>
               </thead>
-
               <tbody>
+                {loading && (
+                  <tr>
+                    <td colSpan={6} className="text-center py-4">
+                      Loading...
+                    </td>
+                  </tr>
+                )}
+                {!loading && filteredEmissions.length === 0 && (
+                  <tr>
+                    <td colSpan={6} className="text-center py-4 text-gray-500">
+                      No emissions recorded yet
+                    </td>
+                  </tr>
+                )}
                 {filteredEmissions.map((e) => (
                   <tr key={e.id} className="border-b hover:bg-gray-50">
                     <td className="py-3 px-4">{e.date}</td>
                     <td className="py-3 px-4">{e.source}</td>
-                    <td className="py-3 px-4">{e.facility}</td>
+                    <td className="py-3 px-4">{e.facility || "—"}</td>
                     <td className="py-3 px-4 text-right">
                       {e.amount?.toLocaleString()}
                     </td>
-                    <td className="py-3 px-4">{e.notes || "-"}</td>
+                    <td className="py-3 px-4">{e.notes || "—"}</td>
                     <td className="py-3 px-4 text-right">
                       <button
                         className="text-red-600 hover:underline"

@@ -16,17 +16,24 @@ export default function AddWasteModal({ open, onClose, onCreated }: Props) {
   const [amount, setAmount] = useState<number | "">("");
   const [date, setDate] = useState("");
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   if (!open) return null;
 
+  function handleClose() {
+    setError(null);
+    onClose();
+  }
+
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-
-    if (!amount || !date) return;
-
+    if (!amount || !date) {
+      setError("Amount and date are required.");
+      return;
+    }
     try {
       setLoading(true);
-
+      setError(null);
       await api.createWaste({
         type,
         facility,
@@ -34,18 +41,16 @@ export default function AddWasteModal({ open, onClose, onCreated }: Props) {
         amount: Number(amount),
         date,
       });
-
       onCreated();
-      onClose();
-
-      // reset form
+      handleClose();
       setType("General");
       setFacility("");
       setMethod("Landfill");
       setAmount("");
       setDate("");
-    } catch (err) {
-      alert("Failed to create waste record");
+    } catch (err: any) {
+      console.error("createWaste failed:", err);
+      setError(err.message || "Failed to create waste record.");
     } finally {
       setLoading(false);
     }
@@ -56,8 +61,13 @@ export default function AddWasteModal({ open, onClose, onCreated }: Props) {
       <div className="bg-white rounded-lg w-full max-w-md p-6 space-y-4">
         <h2 className="text-xl font-semibold">Log Waste</h2>
 
+        {error && (
+          <div className="bg-red-50 border border-red-200 text-red-700 text-sm px-3 py-2 rounded">
+            {error}
+          </div>
+        )}
+
         <form onSubmit={handleSubmit} className="space-y-3">
-          {/* TYPE */}
           <select
             className="w-full border rounded px-3 py-2"
             value={type}
@@ -69,7 +79,6 @@ export default function AddWasteModal({ open, onClose, onCreated }: Props) {
             <option>Hazardous</option>
           </select>
 
-          {/* FACILITY */}
           <input
             type="text"
             placeholder="Facility"
@@ -78,7 +87,6 @@ export default function AddWasteModal({ open, onClose, onCreated }: Props) {
             onChange={(e) => setFacility(e.target.value)}
           />
 
-          {/* METHOD */}
           <select
             className="w-full border rounded px-3 py-2"
             value={method}
@@ -90,7 +98,6 @@ export default function AddWasteModal({ open, onClose, onCreated }: Props) {
             <option>Incineration</option>
           </select>
 
-          {/* AMOUNT */}
           <input
             type="number"
             placeholder="Amount (kg)"
@@ -99,7 +106,6 @@ export default function AddWasteModal({ open, onClose, onCreated }: Props) {
             onChange={(e) => setAmount(Number(e.target.value))}
           />
 
-          {/* DATE */}
           <input
             type="date"
             className="w-full border rounded px-3 py-2"
@@ -107,20 +113,18 @@ export default function AddWasteModal({ open, onClose, onCreated }: Props) {
             onChange={(e) => setDate(e.target.value)}
           />
 
-          {/* ACTIONS */}
           <div className="flex justify-end gap-2 pt-2">
             <button
               type="button"
               className="px-4 py-2 rounded border"
-              onClick={onClose}
+              onClick={handleClose}
             >
               Cancel
             </button>
-
             <button
               type="submit"
               disabled={loading}
-              className="px-4 py-2 rounded bg-black text-white"
+              className="px-4 py-2 rounded bg-black text-white disabled:opacity-50"
             >
               {loading ? "Saving..." : "Save"}
             </button>

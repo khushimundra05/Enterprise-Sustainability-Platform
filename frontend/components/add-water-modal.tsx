@@ -15,41 +15,42 @@ export default function AddWaterModal({ open, onClose, onCreated }: Props) {
   const [source, setSource] = useState("");
   const [facility, setFacility] = useState("");
   const [consumption, setConsumption] = useState("");
-  const [cost, setCost] = useState("");
+  const [notes, setNotes] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   if (!open) return null;
 
+  function handleClose() {
+    setError(null);
+    onClose();
+  }
+
   async function handleSubmit() {
     if (!date || !source || !consumption) {
-      setError("Please fill required fields");
+      setError("Date, source and consumption are required.");
       return;
     }
-
     try {
       setLoading(true);
       setError(null);
-
       await api.createWater({
         date,
         source,
         facility,
         consumption: Number(consumption),
-        cost: cost ? Number(cost) : 0,
+        notes,
       });
-
       onCreated();
-      onClose();
-
-      // reset form
+      handleClose();
       setDate("");
       setSource("");
       setFacility("");
       setConsumption("");
-      setCost("");
+      setNotes("");
     } catch (err: any) {
-      setError(err.message || "Failed to add record");
+      console.error("createWater failed:", err);
+      setError(err.message || "Failed to add water record.");
     } finally {
       setLoading(false);
     }
@@ -60,7 +61,12 @@ export default function AddWaterModal({ open, onClose, onCreated }: Props) {
       <div className="bg-white rounded-lg shadow-lg w-full max-w-md p-6 space-y-4">
         <h2 className="text-xl font-semibold">Log Water Usage</h2>
 
-        {/* DATE */}
+        {error && (
+          <div className="bg-red-50 border border-red-200 text-red-700 text-sm px-3 py-2 rounded">
+            {error}
+          </div>
+        )}
+
         <div className="space-y-1">
           <label className="text-sm font-medium">Date *</label>
           <input
@@ -71,7 +77,6 @@ export default function AddWaterModal({ open, onClose, onCreated }: Props) {
           />
         </div>
 
-        {/* SOURCE DROPDOWN */}
         <div className="space-y-1">
           <label className="text-sm font-medium">Source *</label>
           <select
@@ -86,7 +91,6 @@ export default function AddWaterModal({ open, onClose, onCreated }: Props) {
           </select>
         </div>
 
-        {/* FACILITY */}
         <div className="space-y-1">
           <label className="text-sm font-medium">Facility</label>
           <input
@@ -97,7 +101,6 @@ export default function AddWaterModal({ open, onClose, onCreated }: Props) {
           />
         </div>
 
-        {/* CONSUMPTION */}
         <div className="space-y-1">
           <label className="text-sm font-medium">Consumption (Liters) *</label>
           <input
@@ -109,26 +112,20 @@ export default function AddWaterModal({ open, onClose, onCreated }: Props) {
           />
         </div>
 
-        {/* COST */}
         <div className="space-y-1">
-          <label className="text-sm font-medium">Cost</label>
+          <label className="text-sm font-medium">Notes</label>
           <input
-            type="number"
             className="w-full border rounded px-3 py-2 text-sm"
-            value={cost}
-            onChange={(e) => setCost(e.target.value)}
+            value={notes}
+            onChange={(e) => setNotes(e.target.value)}
             placeholder="Optional"
           />
         </div>
 
-        {error && <p className="text-red-600 text-sm">{error}</p>}
-
-        {/* ACTIONS */}
         <div className="flex justify-end gap-2 pt-2">
-          <Button variant="outline" onClick={onClose}>
+          <Button variant="outline" onClick={handleClose}>
             Cancel
           </Button>
-
           <Button
             onClick={handleSubmit}
             disabled={loading}

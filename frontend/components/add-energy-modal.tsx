@@ -1,43 +1,43 @@
-"use client"
+"use client";
 
-import { useState } from "react"
-import api from "@/lib/api"
-import { Button } from "@/components/ui/button"
+import { useState } from "react";
+import api from "@/lib/api";
+import { Button } from "@/components/ui/button";
 
 type Props = {
-  open: boolean
-  onClose: () => void
-  onCreated: () => void
-}
+  open: boolean;
+  onClose: () => void;
+  onCreated: () => void;
+};
 
 export default function AddEnergyModal({ open, onClose, onCreated }: Props) {
-  const [source, setSource] = useState("Electricity")
-  const [facility, setFacility] = useState("")
-  const [consumption, setConsumption] = useState<number>(0)
-  const [date, setDate] = useState("")
-  const [loading, setLoading] = useState(false)
+  const [source, setSource] = useState("Electricity");
+  const [facility, setFacility] = useState("");
+  const [consumption, setConsumption] = useState<number>(0);
+  const [date, setDate] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
-  if (!open) return null
+  if (!open) return null;
+
+  function handleClose() {
+    setError(null);
+    onClose();
+  }
 
   async function handleSubmit(e: React.FormEvent) {
-    e.preventDefault()
-
+    e.preventDefault();
+    setError(null);
     try {
-      setLoading(true)
-
-      await api.createEnergy({
-        source,
-        facility,
-        consumption,
-        date,
-      })
-
-      onCreated()
-      onClose()
-    } catch (err) {
-      alert("Failed to create energy record")
+      setLoading(true);
+      await api.createEnergy({ source, facility, consumption, date });
+      onCreated();
+      handleClose();
+    } catch (err: any) {
+      console.error("createEnergy failed:", err);
+      setError(err.message || "Failed to create energy record.");
     } finally {
-      setLoading(false)
+      setLoading(false);
     }
   }
 
@@ -45,6 +45,12 @@ export default function AddEnergyModal({ open, onClose, onCreated }: Props) {
     <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
       <div className="bg-white rounded-xl p-6 w-full max-w-md space-y-4">
         <h2 className="text-xl font-semibold">Log Energy Usage</h2>
+
+        {error && (
+          <div className="bg-red-50 border border-red-200 text-red-700 text-sm px-3 py-2 rounded">
+            {error}
+          </div>
+        )}
 
         <form onSubmit={handleSubmit} className="space-y-3">
           <select
@@ -85,7 +91,7 @@ export default function AddEnergyModal({ open, onClose, onCreated }: Props) {
           />
 
           <div className="flex justify-end gap-2 pt-2">
-            <Button type="button" variant="outline" onClick={onClose}>
+            <Button type="button" variant="outline" onClick={handleClose}>
               Cancel
             </Button>
             <Button type="submit" disabled={loading}>
@@ -95,5 +101,5 @@ export default function AddEnergyModal({ open, onClose, onCreated }: Props) {
         </form>
       </div>
     </div>
-  )
+  );
 }

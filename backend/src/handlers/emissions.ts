@@ -1,83 +1,66 @@
-import { PutCommand, ScanCommand } from "@aws-sdk/lib-dynamodb";
-import { db } from "../services/dynamo";
-import { TABLES, CORS } from "../utils/env";
-import { v4 as uuid } from "uuid";
-import { getOrganizationId } from "../utils/getUserId";
+/**
+ * emissions.ts handler
+ *
+ * Thin layer: extracts userId, calls emissionsService, returns response.
+ * Zero DynamoDB imports here.
+ */
+import { APIGatewayProxyHandler } from "aws-lambda";
+import {
+  getAllEmissions,
+  createEmission,
+  deleteEmission,
+} from "../services/emissionsService";
+import { getUserId } from "../utils/getUserId";
+import {
+  ok,
+  created,
+  notFound,
+  badRequest,
+  unauthorized,
+  serverError,
+  isAuthError,
+} from "../utils/response";
 
-const CORS_HEADERS = {
-  "Access-Control-Allow-Origin": CORS.ORIGIN,
-  "Access-Control-Allow-Credentials": "true",
-  "Content-Type": "application/json",
-};
-
-export const getEmissions = async (event: any) => {
+// GET /emissions
+export const getEmissions: APIGatewayProxyHandler = async (event) => {
   try {
-    const organizationId = getOrganizationId(event);
-
-    const result = await db.send(
-      new ScanCommand({
-        TableName: TABLES.EMISSIONS,
-        FilterExpression:
-          "attribute_not_exists(organizationId) OR organizationId = :orgId",
-        ExpressionAttributeValues: {
-          ":orgId": organizationId,
-        },
-      })
-    );
-
-    return {
-      statusCode: 200,
-      headers: CORS_HEADERS,
-      body: JSON.stringify(result.Items || []),
-    };
-  } catch (err) {
+    const userId = getUserId(event);
+    const items = await getAllEmissions(userId);
+    return ok(items);
+  } catch (err: any) {
     console.error("getEmissions error:", err);
-    return {
-      statusCode: 500,
-      headers: CORS_HEADERS,
-      body: JSON.stringify({ message: "Internal server error" }),
-    };
+    return isAuthError(err) ? unauthorized(err.message) : serverError();
   }
 };
 
-export const createEmission = async (event: any) => {
+// POST /emissions
+export const createEmission_: APIGatewayProxyHandler = async (event) => {
   try {
-    if (!event || !event.body) {
-      return {
-        statusCode: 400,
-        headers: CORS_HEADERS,
-        body: JSON.stringify({ message: "Missing request body" }),
-      };
-    }
-
-    const body = JSON.parse(event.body);
-    const organizationId = getOrganizationId(event);
-
-    const item = {
-      id: uuid(),
-      organizationId,
-      ...body,
-      createdAt: new Date().toISOString(),
-    };
-
-    await db.send(
-      new PutCommand({
-        TableName: TABLES.EMISSIONS,
-        Item: item,
-      })
-    );
-
-    return {
-      statusCode: 201,
-      headers: CORS_HEADERS,
-      body: JSON.stringify(item),
-    };
-  } catch (err) {
+    if (!event.body) return badRequest("Missing request body");
+    const userId = getUserId(event);
+    const data = JSON.parse(event.body);
+    const item = await createEmission(userId, data);
+    return created(item);
+  } catch (err: any) {
     console.error("createEmission error:", err);
-    return {
-      statusCode: 500,
-      headers: CORS_HEADERS,
-      body: JSON.stringify({ message: "Internal server error" }),
-    };
+    return isAuthError(err) ? unauthorized(err.message) : serverError();
   }
 };
+
+// DELETE /emissions/{id}
+export const deleteEmission_: APIGatewayProxyHandler = async (event) => {
+  try {
+    const id = event.pathParameters?.id;
+    if (!id) return badRequest("Missing id");
+
+    const userId = getUserId(event);
+    await deleteEmission(id, userId);
+    return ok({ success: true });
+  } catch (err: any) {
+    console.error("deleteEmission error:", err);
+    if (err.message === "Not found") return notFound();
+    return isAuthError(err) ? unauthorized(err.message) : serverError();
+  }
+};
+
+export { createEmission_ as createEmission, deleteEmission_ as deleteEmission };

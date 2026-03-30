@@ -3,38 +3,73 @@
 import { useState } from "react";
 import api from "@/lib/api";
 
-export default function AddSupplierModal({ open, onClose, onCreated }: any) {
+type Props = {
+  open: boolean;
+  onClose: () => void;
+  onCreated: () => void;
+};
+
+export default function AddSupplierModal({ open, onClose, onCreated }: Props) {
   const [name, setName] = useState("");
   const [category, setCategory] = useState("Logistics");
   const [location, setLocation] = useState("");
   const [carbon, setCarbon] = useState("");
   const [certs, setCerts] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   if (!open) return null;
 
-  async function submit(e: any) {
-    e.preventDefault();
-
-    await api.createSupplier({
-      name,
-      category,
-      location,
-      carbonFootprint: Number(carbon),
-      certifications: certs ? certs.split(",").map((c) => c.trim()) : [],
-    });
-
-    onCreated();
+  function handleClose() {
+    setError(null);
     onClose();
   }
 
+  async function submit(e: React.FormEvent) {
+    e.preventDefault();
+    if (!name) {
+      setError("Supplier name is required.");
+      return;
+    }
+    try {
+      setLoading(true);
+      setError(null);
+      await api.createSupplier({
+        name,
+        category,
+        location,
+        carbonFootprint: Number(carbon) || 0,
+        certifications: certs ? certs.split(",").map((c) => c.trim()) : [],
+      });
+      onCreated();
+      handleClose();
+      setName("");
+      setCategory("Logistics");
+      setLocation("");
+      setCarbon("");
+      setCerts("");
+    } catch (err: any) {
+      console.error("createSupplier failed:", err);
+      setError(err.message || "Failed to add supplier.");
+    } finally {
+      setLoading(false);
+    }
+  }
+
   return (
-    <div className="fixed inset-0 bg-black/40 flex items-center justify-center">
+    <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
       <div className="bg-white rounded-lg p-6 w-full max-w-md">
         <h2 className="text-xl font-semibold mb-4">Add Supplier</h2>
 
+        {error && (
+          <div className="bg-red-50 border border-red-200 text-red-700 text-sm px-3 py-2 rounded mb-3">
+            {error}
+          </div>
+        )}
+
         <form className="space-y-3" onSubmit={submit}>
           <input
-            placeholder="Name"
+            placeholder="Name *"
             className="w-full border p-2 rounded"
             value={name}
             onChange={(e) => setName(e.target.value)}
@@ -76,12 +111,16 @@ export default function AddSupplierModal({ open, onClose, onCreated }: any) {
             <button
               type="button"
               className="border px-4 py-2 rounded"
-              onClick={onClose}
+              onClick={handleClose}
             >
               Cancel
             </button>
-            <button className="bg-black text-white px-4 py-2 rounded">
-              Save
+            <button
+              type="submit"
+              disabled={loading}
+              className="bg-black text-white px-4 py-2 rounded disabled:opacity-50"
+            >
+              {loading ? "Saving..." : "Save"}
             </button>
           </div>
         </form>

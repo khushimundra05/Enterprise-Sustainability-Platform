@@ -1,201 +1,106 @@
+/**
+ * compliance.ts handler
+ *
+ * Thin layer: extracts userId, calls service, returns response.
+ * AI recommendations call is here because it orchestrates two things
+ * (DB fetch + OpenAI call) — the service handles each separately.
+ */
+import { APIGatewayProxyHandler } from "aws-lambda";
 import {
-  ScanCommand,
-  PutCommand,
-  DeleteCommand,
-  UpdateCommand,
-} from "@aws-sdk/lib-dynamodb";
-
-import { db } from "../services/dynamo";
-import { v4 as uuid } from "uuid";
+  getAllCompliance,
+  createCompliance,
+  updateCompliance,
+  deleteCompliance,
+} from "../services/complianceService";
 import { generateRecommendations } from "../services/openai";
-import { getOrganizationId } from "../utils/getUserId";
+import { getUserId } from "../utils/getUserId";
+import {
+  ok,
+  created,
+  notFound,
+  badRequest,
+  unauthorized,
+  serverError,
+  isAuthError,
+} from "../utils/response";
 
-const TABLE = process.env.COMPLIANCE_TABLE!;
-
-const headers = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Credentials": true,
-  "Content-Type": "application/json",
-};
-
-/* ---------------- GET ALL ---------------- */
-
-export const getCompliance = async (event: any) => {
+// GET /compliance
+export const getCompliance: APIGatewayProxyHandler = async (event) => {
   try {
-    const organizationId = getOrganizationId(event);
-
-    const result = await db.send(
-      new ScanCommand({
-        TableName: TABLE,
-        FilterExpression:
-          "attribute_not_exists(organizationId) OR organizationId = :orgId",
-        ExpressionAttributeValues: {
-          ":orgId": organizationId,
-        },
-      }),
-    );
-
-    return {
-      statusCode: 200,
-      headers,
-      body: JSON.stringify(result.Items || []),
-    };
-  } catch (err) {
+    const userId = getUserId(event);
+    const items = await getAllCompliance(userId);
+    return ok(items);
+  } catch (err: any) {
     console.error("getCompliance error:", err);
-
-    return {
-      statusCode: 500,
-      headers,
-      body: JSON.stringify({ message: "Failed to fetch regulations" }),
-    };
+    return isAuthError(err) ? unauthorized(err.message) : serverError();
   }
 };
 
-/* ---------------- CREATE ---------------- */
-
-export const createCompliance = async (event: any) => {
+// POST /compliance
+export const createCompliance_: APIGatewayProxyHandler = async (event) => {
   try {
-    const body = JSON.parse(event.body || "{}");
-    const organizationId = getOrganizationId(event);
-
-    const item = {
-      id: uuid(),
-      organizationId,
-      title: body.title,
-      description: body.description,
-      dueDate: body.dueDate,
-      lastAudit: body.lastAudit || null,
-      status: body.status || "Pending",
-      createdAt: new Date().toISOString(),
-    };
-
-    await db.send(
-      new PutCommand({
-        TableName: TABLE,
-        Item: item,
-      }),
-    );
-
-    return {
-      statusCode: 201,
-      headers,
-      body: JSON.stringify(item),
-    };
-  } catch (err) {
+    if (!event.body) return badRequest("Missing request body");
+    const userId = getUserId(event);
+    const data = JSON.parse(event.body);
+    const item = await createCompliance(userId, data);
+    return created(item);
+  } catch (err: any) {
     console.error("createCompliance error:", err);
-
-    return {
-      statusCode: 500,
-      headers,
-      body: JSON.stringify({ message: "Failed to create regulation" }),
-    };
+    return isAuthError(err) ? unauthorized(err.message) : serverError();
   }
 };
 
-/* ---------------- DELETE ---------------- */
-
-export const deleteCompliance = async (event: any) => {
+// PUT /compliance/{id}
+export const updateCompliance_: APIGatewayProxyHandler = async (event) => {
   try {
-    const id = event.pathParameters.id;
+    const id = event.pathParameters?.id;
+    if (!id) return badRequest("Missing id");
+    if (!event.body) return badRequest("Missing request body");
 
-    await db.send(
-      new DeleteCommand({
-        TableName: TABLE,
-        Key: { id },
-      }),
-    );
-
-    return {
-      statusCode: 200,
-      headers,
-      body: JSON.stringify({ message: "Deleted" }),
-    };
-  } catch (err) {
-    console.error("deleteCompliance error:", err);
-
-    return {
-      statusCode: 500,
-      headers,
-      body: JSON.stringify({ message: "Delete failed" }),
-    };
-  }
-};
-
-/* ---------------- UPDATE ---------------- */
-
-export const updateCompliance = async (event: any) => {
-  try {
-    const id = event.pathParameters.id;
-    const body = JSON.parse(event.body);
-
-    const result = await db.send(
-      new UpdateCommand({
-        TableName: TABLE,
-        Key: { id },
-        UpdateExpression:
-          "SET title = :t, description = :d, dueDate = :du, status = :s, lastAudit = :la",
-        ExpressionAttributeValues: {
-          ":t": body.title,
-          ":d": body.description,
-          ":du": body.dueDate,
-          ":s": body.status,
-          ":la": body.lastAudit,
-        },
-        ReturnValues: "ALL_NEW",
-      }),
-    );
-
-    return {
-      statusCode: 200,
-      headers,
-      body: JSON.stringify(result.Attributes),
-    };
-  } catch (err) {
+    const userId = getUserId(event);
+    const data = JSON.parse(event.body);
+    const updated = await updateCompliance(id, userId, data);
+    return ok(updated);
+  } catch (err: any) {
     console.error("updateCompliance error:", err);
-
-    return {
-      statusCode: 500,
-      headers,
-      body: JSON.stringify({ message: "Failed to update regulation" }),
-    };
+    if (err.message === "Not found") return notFound();
+    return isAuthError(err) ? unauthorized(err.message) : serverError();
   }
 };
 
-/* ---------------- AI RECOMMENDATIONS ---------------- */
-
-export const getRecommendations = async (event: any) => {
+// DELETE /compliance/{id}
+export const deleteCompliance_: APIGatewayProxyHandler = async (event) => {
   try {
-    const organizationId = getOrganizationId(event);
+    const id = event.pathParameters?.id;
+    if (!id) return badRequest("Missing id");
 
-    const result = await db.send(
-      new ScanCommand({
-        TableName: TABLE,
-        FilterExpression:
-          "attribute_not_exists(organizationId) OR organizationId = :orgId",
-        ExpressionAttributeValues: {
-          ":orgId": organizationId,
-        },
-      }),
-    );
-
-    const advice = await generateRecommendations(result.Items || []);
-
-    return {
-      statusCode: 200,
-      headers,
-      body: JSON.stringify({
-        advice,
-      }),
-    };
-  } catch (err) {
-    console.error("getRecommendations error:", err);
-
-    return {
-      statusCode: 500,
-      headers,
-      body: JSON.stringify({
-        message: "Failed to generate AI insights",
-      }),
-    };
+    const userId = getUserId(event);
+    await deleteCompliance(id, userId);
+    return ok({ message: "Deleted" });
+  } catch (err: any) {
+    console.error("deleteCompliance error:", err);
+    if (err.message === "Not found") return notFound();
+    return isAuthError(err) ? unauthorized(err.message) : serverError();
   }
+};
+
+// GET /compliance/recommendations
+export const getRecommendations: APIGatewayProxyHandler = async (event) => {
+  try {
+    const userId = getUserId(event);
+    const items = await getAllCompliance(userId);
+    const advice = await generateRecommendations(items);
+    return ok({ advice });
+  } catch (err: any) {
+    console.error("getRecommendations error:", err);
+    return isAuthError(err)
+      ? unauthorized(err.message)
+      : serverError("Failed to generate AI insights");
+  }
+};
+
+export {
+  createCompliance_ as createCompliance,
+  updateCompliance_ as updateCompliance,
+  deleteCompliance_ as deleteCompliance,
 };

@@ -1,102 +1,144 @@
+/**
+ * goals.ts handler
+ *
+ * Fixes:
+ * - Added missing deleteGoal, filterGoals, exportGoals (were in serverless.yml but not implemented)
+ * - updateGoal now derives status automatically in the service layer
+ * - All responses use shared response helpers
+ */
 import { APIGatewayProxyHandler } from "aws-lambda";
-import { v4 as uuidv4 } from "uuid";
-import { db } from "../services/dynamo";
-import { ScanCommand, PutCommand, UpdateCommand } from "@aws-sdk/lib-dynamodb";
-import { getOrganizationId } from "../utils/getUserId";
+import {
+  getAllGoals,
+  createGoal,
+  updateGoal,
+  deleteGoal,
+} from "../services/goalsService";
+import { getUserId } from "../utils/getUserId";
+import {
+  ok,
+  created,
+  notFound,
+  badRequest,
+  unauthorized,
+  serverError,
+  isAuthError,
+  CSV_HEADERS,
+} from "../utils/response";
 
-const TABLE = process.env.GOALS_TABLE!;
-
+// GET /goals
 export const getGoals: APIGatewayProxyHandler = async (event) => {
   try {
-    const organizationId = getOrganizationId(event);
-
-    const result = await db.send(
-      new ScanCommand({
-        TableName: TABLE,
-        FilterExpression:
-          "attribute_not_exists(organizationId) OR organizationId = :orgId",
-        ExpressionAttributeValues: {
-          ":orgId": organizationId,
-        },
-      }),
-    );
-
-    return {
-      statusCode: 200,
-      body: JSON.stringify(result.Items || []),
-    };
-  } catch (err) {
+    const userId = getUserId(event);
+    const items = await getAllGoals(userId);
+    return ok(items);
+  } catch (err: any) {
     console.error("getGoals error:", err);
-    return {
-      statusCode: 500,
-      body: JSON.stringify({ message: "Failed to fetch goals" }),
-    };
+    return isAuthError(err) ? unauthorized(err.message) : serverError();
   }
 };
 
-export const createGoal: APIGatewayProxyHandler = async (event) => {
+// POST /goals
+export const createGoal_: APIGatewayProxyHandler = async (event) => {
   try {
-    const body = JSON.parse(event.body || "{}");
-    const organizationId = getOrganizationId(event);
-
-    const item = {
-      id: uuidv4(),
-      organizationId,
-      title: body.title,
-      category: body.category,
-      target: body.target,
-      unit: body.unit,
-      deadline: body.deadline,
-      progress: 0,
-      status: "on-track",
-      createdAt: new Date().toISOString(),
-    };
-
-    await db.send(
-      new PutCommand({
-        TableName: TABLE,
-        Item: item,
-      }),
-    );
-
-    return {
-      statusCode: 201,
-      body: JSON.stringify(item),
-    };
-  } catch (err) {
+    if (!event.body) return badRequest("Missing request body");
+    const userId = getUserId(event);
+    const data = JSON.parse(event.body);
+    const item = await createGoal(userId, data);
+    return created(item);
+  } catch (err: any) {
     console.error("createGoal error:", err);
-    return {
-      statusCode: 500,
-      body: JSON.stringify({ message: "Failed to create goal" }),
-    };
+    return isAuthError(err) ? unauthorized(err.message) : serverError();
   }
 };
 
-export const updateGoal: APIGatewayProxyHandler = async (event) => {
+// PUT /goals/{id}
+export const updateGoal_: APIGatewayProxyHandler = async (event) => {
   try {
     const id = event.pathParameters?.id;
-    const body = JSON.parse(event.body || "{}");
+    if (!id) return badRequest("Missing id");
+    if (!event.body) return badRequest("Missing request body");
 
-    await db.send(
-      new UpdateCommand({
-        TableName: TABLE,
-        Key: { id },
-        UpdateExpression: "set progress = :p",
-        ExpressionAttributeValues: {
-          ":p": body.progress,
-        },
-      }),
-    );
+    const userId = getUserId(event);
+    const { progress } = JSON.parse(event.body);
+    await updateGoal(id, userId, Number(progress));
+    return ok({ message: "Goal updated" });
+  } catch (err: any) {
+    console.error("updateGoal error:", err);
+    if (err.message === "Not found") return notFound();
+    return isAuthError(err) ? unauthorized(err.message) : serverError();
+  }
+};
+
+// DELETE /goals/{id}
+export const deleteGoal_: APIGatewayProxyHandler = async (event) => {
+  try {
+    const id = event.pathParameters?.id;
+    if (!id) return badRequest("Missing id");
+
+    const userId = getUserId(event);
+    await deleteGoal(id, userId);
+    return ok({ message: "Goal deleted" });
+  } catch (err: any) {
+    console.error("deleteGoal error:", err);
+    if (err.message === "Not found") return notFound();
+    return isAuthError(err) ? unauthorized(err.message) : serverError();
+  }
+};
+
+// GET /goals/filter?category=X&status=Y
+export const filterGoals: APIGatewayProxyHandler = async (event) => {
+  try {
+    const userId = getUserId(event);
+    const { category, status } = event.queryStringParameters || {};
+
+    let items = await getAllGoals(userId);
+
+    if (category) items = items.filter((g) => g.category === category);
+    if (status) items = items.filter((g) => g.status === status);
+
+    return ok(items);
+  } catch (err: any) {
+    console.error("filterGoals error:", err);
+    return isAuthError(err) ? unauthorized(err.message) : serverError();
+  }
+};
+
+// GET /goals/export
+export const exportGoals: APIGatewayProxyHandler = async (event) => {
+  try {
+    const userId = getUserId(event);
+    const items = await getAllGoals(userId);
+
+    const csv = [
+      "title,category,target,unit,deadline,progress,status",
+      ...items.map((g) =>
+        [
+          g.title,
+          g.category,
+          g.target,
+          g.unit,
+          g.deadline,
+          g.progress,
+          g.status,
+        ]
+          .map((v) => `"${String(v ?? "").replaceAll('"', '""')}"`)
+          .join(","),
+      ),
+    ].join("\n");
 
     return {
       statusCode: 200,
-      body: JSON.stringify({ message: "Goal updated" }),
+      headers: CSV_HEADERS("goals.csv"),
+      body: csv,
     };
-  } catch (err) {
-    console.error("updateGoal error:", err);
-    return {
-      statusCode: 500,
-      body: JSON.stringify({ message: "Failed to update goal" }),
-    };
+  } catch (err: any) {
+    console.error("exportGoals error:", err);
+    return isAuthError(err) ? unauthorized(err.message) : serverError();
   }
+};
+
+export {
+  createGoal_ as createGoal,
+  updateGoal_ as updateGoal,
+  deleteGoal_ as deleteGoal,
 };

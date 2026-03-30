@@ -1,59 +1,69 @@
-"use client"
+"use client";
 
-import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@/components/ui/card'
-import { useEffect, useState } from 'react'
+import {
+  Card,
+  CardHeader,
+  CardTitle,
+  CardDescription,
+  CardContent,
+} from "@/components/ui/card";
+import { useEffect, useState } from "react";
+import { getSession } from "@/lib/auth";
 
 type DecodedToken = {
-  email?: string
-  ['custom:organization']?: string
-  name?: string
-}
+  email?: string;
+  sub?: string;
+  "custom:Organisation"?: string;
+  name?: string;
+};
 
 export default function OrganizationSettingsPage() {
-  const [user, setUser] = useState<DecodedToken | null>(null)
+  const [user, setUser] = useState<DecodedToken | null>(null);
 
   useEffect(() => {
-    if (typeof window === 'undefined') return
-    const token = localStorage.getItem('token')
-    if (!token) return
-    try {
-      const [, payload] = token.split('.')
-      const decoded = JSON.parse(atob(payload))
-      setUser(decoded)
-    } catch {
-      // ignore decode errors
-    }
-  }, [])
+    getSession().then((token) => {
+      if (!token) return;
+      try {
+        const payload = JSON.parse(atob(token.split(".")[1]));
+        setUser(payload);
+      } catch {
+        // ignore decode errors
+      }
+    });
+  }, []);
 
   return (
-    <div className="p-6">
+    <div className="p-6 space-y-6">
       <Card>
         <CardHeader>
           <CardTitle>Organization Settings</CardTitle>
-          <CardDescription>Manage organization profile and basic settings.</CardDescription>
+          <CardDescription>
+            Manage organization profile and basic settings.
+          </CardDescription>
         </CardHeader>
         <CardContent>
-          <p className="text-sm text-gray-600 mb-4">
-            Update organization name, address, contact details, and timezone.
-          </p>
-          {user && (
-            <div className="space-y-1 text-sm text-gray-700">
-              <p>
-                <span className="font-medium">Organization:</span>{' '}
-                {user['custom:organization'] || 'Not set'}
-              </p>
-              <p>
-                <span className="font-medium">User:</span>{' '}
-                {user.name || user.email || 'Unknown'}
-              </p>
-              <p>
-                <span className="font-medium">Email:</span>{' '}
-                {user.email || 'Unknown'}
-              </p>
+          {user ? (
+            <div className="space-y-2 text-sm text-gray-700">
+              <div className="flex gap-2">
+                <span className="font-medium w-32">Email:</span>
+                <span>{user.email || "—"}</span>
+              </div>
+              <div className="flex gap-2">
+                <span className="font-medium w-32">User ID:</span>
+                <span className="font-mono text-xs text-gray-500">
+                  {user.sub || "—"}
+                </span>
+              </div>
+              <div className="flex gap-2">
+                <span className="font-medium w-32">Organisation:</span>
+                <span>{user["custom:Organisation"] || "Not set"}</span>
+              </div>
             </div>
+          ) : (
+            <p className="text-sm text-gray-500">Loading user info...</p>
           )}
         </CardContent>
       </Card>
     </div>
-  )
+  );
 }

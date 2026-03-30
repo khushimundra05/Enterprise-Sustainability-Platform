@@ -1,69 +1,68 @@
-import { DynamoDBClient } from "@aws-sdk/client-dynamodb"
+/**
+ * energyService.ts
+ *
+ * Fixes applied:
+ * - Uses shared `db` client from dynamo.ts (not its own DynamoDBClient)
+ * - Uses TABLES from env.ts (not process.env directly)
+ * - getAllEnergy uses QueryCommand (userId is partition key, id is sort key)
+ * - deleteEnergy verifies ownership via GetCommand before deleting
+ */
 import {
-  DynamoDBDocumentClient,
-  ScanCommand,
+  QueryCommand,
   PutCommand,
   DeleteCommand,
-} from "@aws-sdk/lib-dynamodb"
-import { v4 as uuidv4 } from "uuid"
+  GetCommand,
+} from "@aws-sdk/lib-dynamodb";
+import { v4 as uuidv4 } from "uuid";
+import { db } from "./dynamo";
+import { TABLES } from "../utils/env";
 
-const REGION = process.env.AWS_REGION || "ap-south-1"
-const TABLE = process.env.ENERGY_TABLE || "EnergyTable"
-
-const client = new DynamoDBClient({ region: REGION })
-const db = DynamoDBDocumentClient.from(client)
-
-// 🔹 GET ALL ENERGY RECORDS (optionally filtered by organization)
-export async function getAllEnergy(organizationId?: string | null) {
+export async function getAllEnergy(userId: string) {
   const res = await db.send(
-    new ScanCommand({
-      TableName: TABLE,
-      FilterExpression: organizationId
-        ? "attribute_not_exists(organizationId) OR organizationId = :orgId"
-        : undefined,
-      ExpressionAttributeValues: organizationId
-        ? {
-            ":orgId": organizationId,
-          }
-        : undefined,
-    })
-  )
-
-  return res.Items || []
+    new QueryCommand({
+      TableName: TABLES.ENERGY,
+      KeyConditionExpression: "userId = :uid",
+      ExpressionAttributeValues: { ":uid": userId },
+    }),
+  );
+  return res.Items || [];
 }
 
-// 🔹 CREATE ENERGY RECORD
-export async function createEnergy(data: any) {
+export async function createEnergy(userId: string, data: any) {
   const item = {
-    id: uuidv4(),
-    organizationId: data.organizationId ?? null,
+    userId, // partition key
+    id: uuidv4(), // sort key
     source: data.source,
     facility: data.facility,
     consumption: data.consumption,
     cost: data.cost,
     date: data.date,
     createdAt: new Date().toISOString(),
+  };
+
+  await db.send(new PutCommand({ TableName: TABLES.ENERGY, Item: item }));
+  return item;
+}
+
+export async function deleteEnergy(id: string, userId: string) {
+  // Ownership check: if this userId+id combo doesn't exist, item belongs to another user
+  const existing = await db.send(
+    new GetCommand({
+      TableName: TABLES.ENERGY,
+      Key: { userId, id },
+    }),
+  );
+
+  if (!existing.Item) {
+    throw new Error("Not found");
   }
 
   await db.send(
-    new PutCommand({
-      TableName: TABLE,
-      Item: item,
-    })
-  )
-
-  return item
-}
-
-// 🔹 DELETE ENERGY RECORD
-export async function deleteEnergy(id: string) {
-  await db.send(
     new DeleteCommand({
-      TableName: TABLE,
-      Key: { id },
-    })
-  )
+      TableName: TABLES.ENERGY,
+      Key: { userId, id },
+    }),
+  );
 
-  return { success: true }
+  return { success: true };
 }
-

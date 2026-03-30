@@ -2,7 +2,7 @@ service: sustainhub-backend
 
 provider:
   name: aws
-  runtime: nodejs20.x
+  runtime: nodejs22.x
   region: ap-south-1
 
   deploymentBucket:
@@ -14,14 +14,15 @@ provider:
         - Effect: Allow
           Action:
             - dynamodb:PutItem
-            - dynamodb:Scan
             - dynamodb:GetItem
             - dynamodb:UpdateItem
             - dynamodb:DeleteItem
+            - dynamodb:Query
           Resource: "*"
+          # Note: Scan is intentionally removed — we use Query with userId partition key everywhere
 
   environment:
-    EMISSIONS_TABLE: emissions
+    EMISSIONS_TABLE: EmissionsTable
     ENERGY_TABLE: EnergyTable
     WATER_TABLE: WaterTable
     WASTE_TABLE: WasteTable
@@ -32,6 +33,16 @@ provider:
     REPORTS_TABLE: ReportsTable
     CORS_ORIGIN: "*"
     OPENAI_API_KEY: "test"
+    COGNITO_USER_POOL_ID: ${env:COGNITO_USER_POOL_ID, ""}
+    COGNITO_CLIENT_ID: ${env:COGNITO_CLIENT_ID, ""}
+
+# ─────────────────────────────────────────────
+# Cognito authorizer — attach to every protected route
+# ─────────────────────────────────────────────
+# In production, API Gateway verifies the JWT and injects claims
+# into event.requestContext.authorizer.claims automatically.
+# serverless-offline skips verification locally (claims won't be set),
+# so getUserId.ts falls back to manual JWT decode.
 
 functions:
   health:
@@ -41,8 +52,9 @@ functions:
           path: health
           method: get
           cors: true
+          # health is intentionally public — no authorizer
 
-  # Emissions
+  # ── Emissions ──────────────────────────────
   getEmissions:
     handler: src/handlers/emissions.getEmissions
     events:
@@ -50,6 +62,9 @@ functions:
           path: emissions
           method: get
           cors: true
+          authorizer:
+            type: COGNITO_USER_POOLS
+            authorizerId: !Ref CognitoAuthorizer
 
   createEmission:
     handler: src/handlers/emissions.createEmission
@@ -58,16 +73,22 @@ functions:
           path: emissions
           method: post
           cors: true
+          authorizer:
+            type: COGNITO_USER_POOLS
+            authorizerId: !Ref CognitoAuthorizer
 
   deleteEmission:
-    handler: src/handlers/deleteEmission.handler
+    handler: src/handlers/emissions.deleteEmission
     events:
       - http:
           path: emissions/{id}
           method: delete
           cors: true
+          authorizer:
+            type: COGNITO_USER_POOLS
+            authorizerId: !Ref CognitoAuthorizer
 
-  # Energy
+  # ── Energy ─────────────────────────────────
   getEnergy:
     handler: src/handlers/energy.getEnergy
     events:
@@ -75,6 +96,9 @@ functions:
           path: energy
           method: get
           cors: true
+          authorizer:
+            type: COGNITO_USER_POOLS
+            authorizerId: !Ref CognitoAuthorizer
 
   createEnergy:
     handler: src/handlers/energy.createEnergyRecord
@@ -83,6 +107,9 @@ functions:
           path: energy
           method: post
           cors: true
+          authorizer:
+            type: COGNITO_USER_POOLS
+            authorizerId: !Ref CognitoAuthorizer
 
   deleteEnergy:
     handler: src/handlers/energy.deleteEnergyRecord
@@ -91,8 +118,11 @@ functions:
           path: energy/{id}
           method: delete
           cors: true
+          authorizer:
+            type: COGNITO_USER_POOLS
+            authorizerId: !Ref CognitoAuthorizer
 
-  # Water
+  # ── Water ──────────────────────────────────
   getWater:
     handler: src/handlers/water.getWater
     events:
@@ -100,6 +130,9 @@ functions:
           path: water
           method: get
           cors: true
+          authorizer:
+            type: COGNITO_USER_POOLS
+            authorizerId: !Ref CognitoAuthorizer
 
   createWater:
     handler: src/handlers/water.createWater
@@ -108,6 +141,9 @@ functions:
           path: water
           method: post
           cors: true
+          authorizer:
+            type: COGNITO_USER_POOLS
+            authorizerId: !Ref CognitoAuthorizer
 
   deleteWater:
     handler: src/handlers/water.deleteWater
@@ -116,8 +152,11 @@ functions:
           path: water/{id}
           method: delete
           cors: true
+          authorizer:
+            type: COGNITO_USER_POOLS
+            authorizerId: !Ref CognitoAuthorizer
 
-  # Waste
+  # ── Waste ──────────────────────────────────
   getWaste:
     handler: src/handlers/waste.getWaste
     events:
@@ -125,6 +164,9 @@ functions:
           path: waste
           method: get
           cors: true
+          authorizer:
+            type: COGNITO_USER_POOLS
+            authorizerId: !Ref CognitoAuthorizer
 
   createWaste:
     handler: src/handlers/waste.createWaste
@@ -133,6 +175,9 @@ functions:
           path: waste
           method: post
           cors: true
+          authorizer:
+            type: COGNITO_USER_POOLS
+            authorizerId: !Ref CognitoAuthorizer
 
   deleteWaste:
     handler: src/handlers/waste.deleteWaste
@@ -141,8 +186,11 @@ functions:
           path: waste/{id}
           method: delete
           cors: true
+          authorizer:
+            type: COGNITO_USER_POOLS
+            authorizerId: !Ref CognitoAuthorizer
 
-  # Suppliers
+  # ── Suppliers ──────────────────────────────
   getSuppliers:
     handler: src/handlers/suppliers.getSuppliers
     events:
@@ -150,6 +198,9 @@ functions:
           path: suppliers
           method: get
           cors: true
+          authorizer:
+            type: COGNITO_USER_POOLS
+            authorizerId: !Ref CognitoAuthorizer
 
   createSupplier:
     handler: src/handlers/suppliers.createSupplier
@@ -158,6 +209,9 @@ functions:
           path: suppliers
           method: post
           cors: true
+          authorizer:
+            type: COGNITO_USER_POOLS
+            authorizerId: !Ref CognitoAuthorizer
 
   assessSupplier:
     handler: src/handlers/suppliers.assessSupplier
@@ -166,6 +220,9 @@ functions:
           path: suppliers/{id}/assess
           method: put
           cors: true
+          authorizer:
+            type: COGNITO_USER_POOLS
+            authorizerId: !Ref CognitoAuthorizer
 
   deleteSupplier:
     handler: src/handlers/suppliers.deleteSupplier
@@ -174,6 +231,9 @@ functions:
           path: suppliers/{id}
           method: delete
           cors: true
+          authorizer:
+            type: COGNITO_USER_POOLS
+            authorizerId: !Ref CognitoAuthorizer
 
   exportSuppliers:
     handler: src/handlers/suppliers.exportSuppliers
@@ -182,8 +242,11 @@ functions:
           path: suppliers/export
           method: get
           cors: true
+          authorizer:
+            type: COGNITO_USER_POOLS
+            authorizerId: !Ref CognitoAuthorizer
 
-  # Compliance
+  # ── Compliance ─────────────────────────────
   getCompliance:
     handler: src/handlers/compliance.getCompliance
     events:
@@ -191,6 +254,9 @@ functions:
           path: compliance
           method: get
           cors: true
+          authorizer:
+            type: COGNITO_USER_POOLS
+            authorizerId: !Ref CognitoAuthorizer
 
   createCompliance:
     handler: src/handlers/compliance.createCompliance
@@ -199,6 +265,9 @@ functions:
           path: compliance
           method: post
           cors: true
+          authorizer:
+            type: COGNITO_USER_POOLS
+            authorizerId: !Ref CognitoAuthorizer
 
   updateCompliance:
     handler: src/handlers/compliance.updateCompliance
@@ -207,6 +276,9 @@ functions:
           path: compliance/{id}
           method: put
           cors: true
+          authorizer:
+            type: COGNITO_USER_POOLS
+            authorizerId: !Ref CognitoAuthorizer
 
   deleteCompliance:
     handler: src/handlers/compliance.deleteCompliance
@@ -215,6 +287,9 @@ functions:
           path: compliance/{id}
           method: delete
           cors: true
+          authorizer:
+            type: COGNITO_USER_POOLS
+            authorizerId: !Ref CognitoAuthorizer
 
   getRecommendations:
     handler: src/handlers/compliance.getRecommendations
@@ -223,8 +298,11 @@ functions:
           path: compliance/recommendations
           method: get
           cors: true
+          authorizer:
+            type: COGNITO_USER_POOLS
+            authorizerId: !Ref CognitoAuthorizer
 
-  # Goals
+  # ── Goals ──────────────────────────────────
   getGoals:
     handler: src/handlers/goals.getGoals
     events:
@@ -232,6 +310,9 @@ functions:
           path: goals
           method: get
           cors: true
+          authorizer:
+            type: COGNITO_USER_POOLS
+            authorizerId: !Ref CognitoAuthorizer
 
   createGoal:
     handler: src/handlers/goals.createGoal
@@ -240,6 +321,9 @@ functions:
           path: goals
           method: post
           cors: true
+          authorizer:
+            type: COGNITO_USER_POOLS
+            authorizerId: !Ref CognitoAuthorizer
 
   updateGoal:
     handler: src/handlers/goals.updateGoal
@@ -248,6 +332,9 @@ functions:
           path: goals/{id}
           method: put
           cors: true
+          authorizer:
+            type: COGNITO_USER_POOLS
+            authorizerId: !Ref CognitoAuthorizer
 
   deleteGoal:
     handler: src/handlers/goals.deleteGoal
@@ -256,6 +343,9 @@ functions:
           path: goals/{id}
           method: delete
           cors: true
+          authorizer:
+            type: COGNITO_USER_POOLS
+            authorizerId: !Ref CognitoAuthorizer
 
   filterGoals:
     handler: src/handlers/goals.filterGoals
@@ -264,6 +354,9 @@ functions:
           path: goals/filter
           method: get
           cors: true
+          authorizer:
+            type: COGNITO_USER_POOLS
+            authorizerId: !Ref CognitoAuthorizer
 
   exportGoals:
     handler: src/handlers/goals.exportGoals
@@ -272,8 +365,11 @@ functions:
           path: goals/export
           method: get
           cors: true
+          authorizer:
+            type: COGNITO_USER_POOLS
+            authorizerId: !Ref CognitoAuthorizer
 
-  # Teams
+  # ── Teams ──────────────────────────────────
   getTeams:
     handler: src/handlers/teams.getTeams
     events:
@@ -281,6 +377,9 @@ functions:
           path: teams
           method: get
           cors: true
+          authorizer:
+            type: COGNITO_USER_POOLS
+            authorizerId: !Ref CognitoAuthorizer
 
   createTeam:
     handler: src/handlers/teams.createTeam
@@ -289,6 +388,9 @@ functions:
           path: teams
           method: post
           cors: true
+          authorizer:
+            type: COGNITO_USER_POOLS
+            authorizerId: !Ref CognitoAuthorizer
 
   updateTeam:
     handler: src/handlers/teams.updateTeam
@@ -297,6 +399,9 @@ functions:
           path: teams/{id}
           method: put
           cors: true
+          authorizer:
+            type: COGNITO_USER_POOLS
+            authorizerId: !Ref CognitoAuthorizer
 
   filterTeams:
     handler: src/handlers/teams.filterTeams
@@ -305,6 +410,9 @@ functions:
           path: teams/filter
           method: get
           cors: true
+          authorizer:
+            type: COGNITO_USER_POOLS
+            authorizerId: !Ref CognitoAuthorizer
 
   exportTeams:
     handler: src/handlers/teams.exportTeams
@@ -313,8 +421,11 @@ functions:
           path: teams/export
           method: get
           cors: true
+          authorizer:
+            type: COGNITO_USER_POOLS
+            authorizerId: !Ref CognitoAuthorizer
 
-  # Reports
+  # ── Reports ────────────────────────────────
   getReports:
     handler: src/handlers/reports.getReports
     events:
@@ -322,6 +433,9 @@ functions:
           path: reports
           method: get
           cors: true
+          authorizer:
+            type: COGNITO_USER_POOLS
+            authorizerId: !Ref CognitoAuthorizer
 
   createReport:
     handler: src/handlers/reports.createReport
@@ -330,6 +444,9 @@ functions:
           path: reports
           method: post
           cors: true
+          authorizer:
+            type: COGNITO_USER_POOLS
+            authorizerId: !Ref CognitoAuthorizer
 
   filterReports:
     handler: src/handlers/reports.filterReports
@@ -338,6 +455,9 @@ functions:
           path: reports/filter
           method: get
           cors: true
+          authorizer:
+            type: COGNITO_USER_POOLS
+            authorizerId: !Ref CognitoAuthorizer
 
   exportReports:
     handler: src/handlers/reports.exportReports
@@ -346,6 +466,9 @@ functions:
           path: reports/export
           method: get
           cors: true
+          authorizer:
+            type: COGNITO_USER_POOLS
+            authorizerId: !Ref CognitoAuthorizer
 
   downloadReport:
     handler: src/handlers/reports.downloadReport
@@ -354,6 +477,9 @@ functions:
           path: reports/{id}/download
           method: get
           cors: true
+          authorizer:
+            type: COGNITO_USER_POOLS
+            authorizerId: !Ref CognitoAuthorizer
 
   generateReport:
     handler: src/handlers/reports.generateReport
@@ -362,22 +488,46 @@ functions:
           path: reports/generate
           method: post
           cors: true
+          authorizer:
+            type: COGNITO_USER_POOLS
+            authorizerId: !Ref CognitoAuthorizer
 
 plugins:
   - serverless-offline
 
+# ─────────────────────────────────────────────
+# Resources
+# All tables now use userId (HASH) + id (RANGE) as keys.
+# This enables QueryCommand per-user without Scan.
+# EnergyTable already had this pattern — the rest are updated to match.
+# ─────────────────────────────────────────────
 resources:
   Resources:
+    # Cognito Authorizer resource (referenced by all protected routes above)
+    CognitoAuthorizer:
+      Type: AWS::ApiGateway::Authorizer
+      Properties:
+        Name: CognitoAuthorizer
+        Type: COGNITO_USER_POOLS
+        IdentitySource: method.request.header.Authorization
+        RestApiId: !Ref ApiGatewayRestApi
+        ProviderARNs:
+          - !Sub arn:aws:cognito-idp:${AWS::Region}:${AWS::AccountId}:userpool/${COGNITO_USER_POOL_ID}
+
     EmissionsTable:
       Type: AWS::DynamoDB::Table
       Properties:
         TableName: ${self:provider.environment.EMISSIONS_TABLE}
         AttributeDefinitions:
+          - AttributeName: userId
+            AttributeType: S
           - AttributeName: id
             AttributeType: S
         KeySchema:
-          - AttributeName: id
+          - AttributeName: userId
             KeyType: HASH
+          - AttributeName: id
+            KeyType: RANGE
         BillingMode: PAY_PER_REQUEST
 
     EnergyTable:
@@ -385,11 +535,15 @@ resources:
       Properties:
         TableName: ${self:provider.environment.ENERGY_TABLE}
         AttributeDefinitions:
+          - AttributeName: userId
+            AttributeType: S
           - AttributeName: id
             AttributeType: S
         KeySchema:
-          - AttributeName: id
+          - AttributeName: userId
             KeyType: HASH
+          - AttributeName: id
+            KeyType: RANGE
         BillingMode: PAY_PER_REQUEST
 
     WaterTable:
@@ -397,11 +551,15 @@ resources:
       Properties:
         TableName: ${self:provider.environment.WATER_TABLE}
         AttributeDefinitions:
+          - AttributeName: userId
+            AttributeType: S
           - AttributeName: id
             AttributeType: S
         KeySchema:
-          - AttributeName: id
+          - AttributeName: userId
             KeyType: HASH
+          - AttributeName: id
+            KeyType: RANGE
         BillingMode: PAY_PER_REQUEST
 
     WasteTable:
@@ -409,11 +567,15 @@ resources:
       Properties:
         TableName: ${self:provider.environment.WASTE_TABLE}
         AttributeDefinitions:
+          - AttributeName: userId
+            AttributeType: S
           - AttributeName: id
             AttributeType: S
         KeySchema:
-          - AttributeName: id
+          - AttributeName: userId
             KeyType: HASH
+          - AttributeName: id
+            KeyType: RANGE
         BillingMode: PAY_PER_REQUEST
 
     SuppliersTable:
@@ -421,11 +583,15 @@ resources:
       Properties:
         TableName: ${self:provider.environment.SUPPLIERS_TABLE}
         AttributeDefinitions:
+          - AttributeName: userId
+            AttributeType: S
           - AttributeName: id
             AttributeType: S
         KeySchema:
-          - AttributeName: id
+          - AttributeName: userId
             KeyType: HASH
+          - AttributeName: id
+            KeyType: RANGE
         BillingMode: PAY_PER_REQUEST
 
     ComplianceTable:
@@ -433,11 +599,15 @@ resources:
       Properties:
         TableName: ${self:provider.environment.COMPLIANCE_TABLE}
         AttributeDefinitions:
+          - AttributeName: userId
+            AttributeType: S
           - AttributeName: id
             AttributeType: S
         KeySchema:
-          - AttributeName: id
+          - AttributeName: userId
             KeyType: HASH
+          - AttributeName: id
+            KeyType: RANGE
         BillingMode: PAY_PER_REQUEST
 
     GoalsTable:
@@ -445,11 +615,15 @@ resources:
       Properties:
         TableName: ${self:provider.environment.GOALS_TABLE}
         AttributeDefinitions:
+          - AttributeName: userId
+            AttributeType: S
           - AttributeName: id
             AttributeType: S
         KeySchema:
-          - AttributeName: id
+          - AttributeName: userId
             KeyType: HASH
+          - AttributeName: id
+            KeyType: RANGE
         BillingMode: PAY_PER_REQUEST
 
     TeamsTable:
@@ -457,11 +631,15 @@ resources:
       Properties:
         TableName: ${self:provider.environment.TEAMS_TABLE}
         AttributeDefinitions:
+          - AttributeName: userId
+            AttributeType: S
           - AttributeName: id
             AttributeType: S
         KeySchema:
-          - AttributeName: id
+          - AttributeName: userId
             KeyType: HASH
+          - AttributeName: id
+            KeyType: RANGE
         BillingMode: PAY_PER_REQUEST
 
     ReportsTable:
@@ -469,9 +647,13 @@ resources:
       Properties:
         TableName: ${self:provider.environment.REPORTS_TABLE}
         AttributeDefinitions:
+          - AttributeName: userId
+            AttributeType: S
           - AttributeName: id
             AttributeType: S
         KeySchema:
-          - AttributeName: id
+          - AttributeName: userId
             KeyType: HASH
+          - AttributeName: id
+            KeyType: RANGE
         BillingMode: PAY_PER_REQUEST

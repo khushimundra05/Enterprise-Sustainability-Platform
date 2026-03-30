@@ -1,375 +1,185 @@
+/**
+ * reports.ts handler — fixed PDF download
+ */
+import { APIGatewayProxyHandler } from "aws-lambda";
+import PDFDocument from "pdfkit";
 import {
-  ScanCommand,
-  PutCommand,
-  GetCommand,
-  UpdateCommand,
-} from "@aws-sdk/lib-dynamodb";
-import { db } from "../services/dynamo";
-import { v4 as uuid } from "uuid";
-import { getOrganizationId } from "../utils/getUserId";
+  getAllReports,
+  getReportById,
+  createReport,
+  deleteReport,
+  incrementDownloads,
+} from "../services/reportsService";
+import { getUserId } from "../utils/getUserId";
+import {
+  ok,
+  notFound,
+  badRequest,
+  unauthorized,
+  serverError,
+  isAuthError,
+  CSV_HEADERS,
+  PDF_HEADERS,
+} from "../utils/response";
 
-const TABLE = process.env.REPORTS_TABLE!;
-
-const headers = {
-  "Access-Control-Allow-Origin": "*",
-  "Content-Type": "application/json",
-};
-
-/* GET REPORTS */
-
-export const getReports = async (event: any) => {
+export const getReports: APIGatewayProxyHandler = async (event) => {
   try {
-    const organizationId = getOrganizationId(event);
-
-    const result = await db.send(
-      new ScanCommand({
-        TableName: TABLE,
-        FilterExpression:
-          "attribute_not_exists(organizationId) OR organizationId = :orgId",
-        ExpressionAttributeValues: {
-          ":orgId": organizationId,
-        },
-      }),
-    );
-
-    return {
-      statusCode: 200,
-      headers,
-      body: JSON.stringify(result.Items || []),
-    };
-  } catch (err) {
-    console.error("getReports error:", err);
-
-    return {
-      statusCode: 500,
-      headers,
-      body: JSON.stringify({ message: "Failed to fetch reports" }),
-    };
+    const userId = getUserId(event);
+    return ok(await getAllReports(userId));
+  } catch (err: any) {
+    return isAuthError(err) ? unauthorized(err.message) : serverError();
   }
 };
 
-/* GENERATE REPORT */
-
-export const generateReport = async (event: any) => {
+export const createReport_: APIGatewayProxyHandler = async (event) => {
   try {
-    const body = JSON.parse(event.body || "{}");
-    const organizationId = getOrganizationId(event);
-
-    const id = uuid();
-
-    const item = {
-      id,
-      organizationId,
-      title: body.title,
-      type: body.type || "sustainability",
-      status: body.status || "published",
-      generated: new Date().toISOString(),
-      emissions: body.emissions,
-      renewableEnergy: body.renewableEnergy,
-      waterUsage: body.waterUsage,
-      wasteRecycled: body.wasteRecycled,
-      downloads: 0,
-    };
-
-    await db.send(
-      new PutCommand({
-        TableName: TABLE,
-        Item: item,
-      }),
-    );
-
-    return {
-      statusCode: 200,
-      headers,
-      body: JSON.stringify(item),
-    };
-  } catch (err) {
-    console.error("generateReport error:", err);
-
-    return {
-      statusCode: 500,
-      headers,
-      body: JSON.stringify({ message: "Failed to generate report" }),
-    };
+    if (!event.body) return badRequest("Missing request body");
+    const userId = getUserId(event);
+    return ok(await createReport(userId, JSON.parse(event.body)));
+  } catch (err: any) {
+    return isAuthError(err) ? unauthorized(err.message) : serverError();
   }
 };
 
-/* CREATE REPORT (alias of generate for POST /reports) */
-
-export const createReport = async (event: any) => {
-  return generateReport(event);
-};
-
-/* FILTER REPORTS */
-
-export const filterReports = async (event: any) => {
+export const filterReports: APIGatewayProxyHandler = async (event) => {
   try {
-    const organizationId = getOrganizationId(event);
-    const type = event.queryStringParameters?.type;
-    const status = event.queryStringParameters?.status;
-    const q = (event.queryStringParameters?.q || "").toLowerCase();
-
-    const result = await db.send(
-      new ScanCommand({
-        TableName: TABLE,
-        FilterExpression:
-          "attribute_not_exists(organizationId) OR organizationId = :orgId",
-        ExpressionAttributeValues: {
-          ":orgId": organizationId,
-        },
-      }),
-    );
-
-    let items: any[] = result.Items || [];
-
-    if (type) items = items.filter((r) => (r.type || "") === type);
-    if (status) items = items.filter((r) => (r.status || "") === status);
-    if (q) items = items.filter((r) => (r.title || "").toLowerCase().includes(q));
-
-    items.sort(
-      (a, b) => new Date(b.generated).getTime() - new Date(a.generated).getTime(),
-    );
-
-    return {
-      statusCode: 200,
-      headers,
-      body: JSON.stringify(items),
-    };
-  } catch (err) {
-    console.error("filterReports error:", err);
-    return {
-      statusCode: 500,
-      headers,
-      body: JSON.stringify({ message: "Failed to filter reports" }),
-    };
+    const userId = getUserId(event);
+    const { type, status } = event.queryStringParameters || {};
+    let items = await getAllReports(userId);
+    if (type) items = items.filter((r) => r.type === type);
+    if (status) items = items.filter((r) => r.status === status);
+    return ok(items);
+  } catch (err: any) {
+    return isAuthError(err) ? unauthorized(err.message) : serverError();
   }
 };
 
-/* EXPORT ALL REPORTS */
-
-export const exportReports = async (event: any) => {
+export const exportReports: APIGatewayProxyHandler = async (event) => {
   try {
-    const organizationId = getOrganizationId(event);
-
-    const result = await db.send(
-      new ScanCommand({
-        TableName: TABLE,
-        FilterExpression:
-          "attribute_not_exists(organizationId) OR organizationId = :orgId",
-        ExpressionAttributeValues: {
-          ":orgId": organizationId,
-        },
-      }),
-    );
-
-    const reports = result.Items || [];
-
-    let html = `
-  <html>
-  <head>
-  <title>Sustainability Reports</title>
-
-  <style>
-  body{
-    font-family:Arial;
-    padding:40px;
+    const userId = getUserId(event);
+    const items = await getAllReports(userId);
+    const csv = [
+      "title,generated,type,status,downloads,emissions,renewableEnergy,waterUsage,wasteRecycled",
+      ...items.map((r) =>
+        [
+          r.title,
+          r.generated,
+          r.type,
+          r.status,
+          r.downloads,
+          r.emissions,
+          r.renewableEnergy,
+          r.waterUsage,
+          r.wasteRecycled,
+        ]
+          .map((v) => `"${String(v ?? "").replaceAll('"', '""')}"`)
+          .join(","),
+      ),
+    ].join("\n");
+    return { statusCode: 200, headers: CSV_HEADERS("reports.csv"), body: csv };
+  } catch (err: any) {
+    return isAuthError(err) ? unauthorized(err.message) : serverError();
   }
+};
 
-  h1{
-    color:#047857;
-  }
+export const downloadReport: APIGatewayProxyHandler = async (event) => {
+  try {
+    const id = event.pathParameters?.id;
+    if (!id) return badRequest("Missing id");
 
-  .report{
-    border:1px solid #ddd;
-    padding:20px;
-    margin-bottom:20px;
-    border-radius:8px;
-  }
+    const userId = getUserId(event);
+    const report = await getReportById(id, userId);
+    if (!report) return notFound("Report not found");
 
-  </style>
-  </head>
+    const pdfBuffer = await new Promise<Buffer>((resolve, reject) => {
+      const doc: PDFKit.PDFDocument = new (PDFDocument as any)({ margin: 50 });
+      const chunks: Buffer[] = [];
+      doc.on("data", (chunk: Buffer) => chunks.push(chunk));
+      doc.on("end", () => resolve(Buffer.concat(chunks)));
+      doc.on("error", reject);
 
-  <body>
+      doc
+        .fontSize(24)
+        .font("Helvetica-Bold")
+        .text(report.title, { align: "center" });
+      doc.moveDown(0.5);
+      doc
+        .fontSize(12)
+        .font("Helvetica")
+        .fillColor("#666666")
+        .text(`Generated: ${new Date(report.generated).toLocaleDateString()}`, {
+          align: "center",
+        });
+      doc.moveDown(2);
+      doc.moveTo(50, doc.y).lineTo(562, doc.y).strokeColor("#e5e7eb").stroke();
+      doc.moveDown(1);
 
-  <h1>Sustainability Reports</h1>
-  `;
+      doc
+        .fontSize(16)
+        .font("Helvetica-Bold")
+        .fillColor("#111827")
+        .text("Key Metrics");
+      doc.moveDown(0.5);
 
-    reports.forEach((r: any) => {
-      html += `
-    <div class="report">
-      <h2>${r.title}</h2>
-      <p><b>Generated:</b> ${new Date(r.generated).toLocaleDateString()}</p>
-      <p><b>Emissions:</b> ${r.emissions}</p>
-      <p><b>Renewable Energy:</b> ${r.renewableEnergy}%</p>
-      <p><b>Water Usage:</b> ${r.waterUsage}</p>
-      <p><b>Waste Recycled:</b> ${r.wasteRecycled}%</p>
-    </div>
-    `;
+      [
+        [
+          "Carbon Emissions",
+          `${(report.emissions / 1000).toFixed(1)}K kg CO2e`,
+        ],
+        ["Renewable Energy", `${report.renewableEnergy}%`],
+        ["Water Usage", `${(report.waterUsage / 1000).toFixed(1)}K liters`],
+        ["Waste Recycled", `${report.wasteRecycled}%`],
+      ].forEach(([label, value]) => {
+        doc
+          .fontSize(12)
+          .font("Helvetica-Bold")
+          .fillColor("#374151")
+          .text(label, { continued: true });
+        doc.font("Helvetica").fillColor("#6b7280").text(`  ${value}`);
+        doc.moveDown(0.3);
+      });
+
+      doc.moveDown(1);
+      doc
+        .fontSize(10)
+        .fillColor("#9ca3af")
+        .text("Generated by SustainHub", { align: "center" });
+      doc.end();
     });
 
-    html += `
-  </body>
-  </html>
-  `;
+    await incrementDownloads(id, userId).catch((e) =>
+      console.warn("increment failed:", e),
+    );
 
     return {
       statusCode: 200,
-      headers: {
-        "Content-Type": "text/html",
-        "Content-Disposition": "attachment; filename=reports.html",
-        "Access-Control-Allow-Origin": "*",
-      },
-      body: html,
+      headers: PDF_HEADERS(`${report.title}.pdf`),
+      body: pdfBuffer.toString("base64"),
+      isBase64Encoded: true,
     };
-  } catch (err) {
-    console.error("exportReports error:", err);
-
-    return {
-      statusCode: 500,
-      headers,
-      body: JSON.stringify({ message: "Failed to export reports" }),
-    };
+  } catch (err: any) {
+    console.error("downloadReport error:", err);
+    if (err.message === "Not found") return notFound();
+    return isAuthError(err)
+      ? unauthorized(err.message)
+      : serverError(err.message);
   }
 };
 
-/* DOWNLOAD SINGLE REPORT */
-
-export const downloadReport = async (event: any) => {
+export const deleteReport_: APIGatewayProxyHandler = async (event) => {
   try {
-    const id = event.pathParameters.id;
-
-    const result = await db.send(
-      new GetCommand({
-        TableName: TABLE,
-        Key: { id },
-      }),
-    );
-
-    const report: any = result.Item;
-
-    if (!report) {
-      return {
-        statusCode: 404,
-        headers,
-        body: JSON.stringify({ message: "Report not found" }),
-      };
-    }
-
-    await db.send(
-      new UpdateCommand({
-        TableName: TABLE,
-        Key: { id },
-        UpdateExpression: "SET downloads = downloads + :inc",
-        ExpressionAttributeValues: {
-          ":inc": 1,
-        },
-      }),
-    );
-
-    const html = `
-  <html>
-
-  <head>
-  <title>${report.title}</title>
-
-  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-
-  <style>
-
-  body{
-    font-family:Arial;
-    padding:40px;
+    const id = event.pathParameters?.id;
+    if (!id) return badRequest("Missing id");
+    await deleteReport(id, getUserId(event));
+    return ok({ message: "Report deleted" });
+  } catch (err: any) {
+    if (err.message === "Not found") return notFound();
+    return isAuthError(err) ? unauthorized(err.message) : serverError();
   }
+};
 
-  h1{
-    color:#047857;
-  }
-
-  .grid{
-    display:grid;
-    grid-template-columns:repeat(2,1fr);
-    gap:20px;
-  }
-
-  .card{
-    border:1px solid #ddd;
-    padding:20px;
-    border-radius:8px;
-  }
-
-  </style>
-
-  </head>
-
-  <body>
-
-  <h1>${report.title}</h1>
-
-  <p>Generated: ${new Date(report.generated).toLocaleDateString()}</p>
-
-  <div class="grid">
-
-  <div class="card">
-  <h3>Emissions</h3>
-  <h2>${report.emissions}</h2>
-  </div>
-
-  <div class="card">
-  <h3>Renewable Energy</h3>
-  <h2>${report.renewableEnergy}%</h2>
-  </div>
-
-  <div class="card">
-  <h3>Water Usage</h3>
-  <h2>${report.waterUsage}</h2>
-  </div>
-
-  <div class="card">
-  <h3>Waste Recycled</h3>
-  <h2>${report.wasteRecycled}%</h2>
-  </div>
-
-  </div>
-
-  <h2>Carbon Distribution</h2>
-
-  <canvas id="chart"></canvas>
-
-  <script>
-
-  new Chart(document.getElementById('chart'),{
-    type:'pie',
-    data:{
-      labels:['Energy','Transport','Supply Chain','Waste'],
-      datasets:[{
-        data:[245000,128000,892000,45000],
-        backgroundColor:['#10b981','#059669','#047857','#065f46']
-      }]
-    }
-  })
-
-  </script>
-
-  </body>
-  </html>
-  `;
-
-    return {
-      statusCode: 200,
-      headers: {
-        "Content-Type": "text/html",
-        "Content-Disposition": `attachment; filename=${report.title}.html`,
-        "Access-Control-Allow-Origin": "*",
-      },
-      body: html,
-    };
-  } catch (err) {
-    console.error("downloadReport error:", err);
-
-    return {
-      statusCode: 500,
-      headers,
-      body: JSON.stringify({ message: "Failed to download report" }),
-    };
-  }
+export {
+  createReport_ as createReport,
+  createReport_ as generateReport,
+  deleteReport_ as deleteReport,
 };
