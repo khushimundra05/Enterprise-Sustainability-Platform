@@ -29,7 +29,14 @@ import {
   CheckCircle2,
   Clock,
   Plus,
+  Wind,
+  Zap,
+  Droplet,
+  Trash2,
+  Goal,
+  Activity,
 } from "lucide-react";
+import { Badge } from "@/components/ui/badge";
 import api, {
   Emission,
   EnergyRecord,
@@ -39,6 +46,9 @@ import api, {
 } from "@/lib/api";
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
+import { RecommendedActionsSection } from "@/components/dashboard/recommended-actions";
+import { AnomalyAlertsSection } from "@/components/dashboard/anomaly-alerts";
+import { GoalProgressSection } from "@/components/dashboard/goal-progress";
 
 const MONTH_ORDER = [
   "Jan",
@@ -134,7 +144,7 @@ export default function DashboardPage() {
     }));
   }, [emissions]);
 
-  const colors = ["#10b981", "#059669", "#047857", "#065f46"];
+  const colors = ["#10b981", "#06b6d4", "#f59e0b", "#ef4444"];
 
   const kpis = [
     {
@@ -145,65 +155,84 @@ export default function DashboardPage() {
           : "0 kg",
       sub: "CO₂e total",
       link: "/carbon",
+      icon: Wind,
+      color: "text-green-600 dark:text-green-400",
+      bg: "bg-green-100 dark:bg-green-900/30",
     },
     {
       label: "Renewable Energy",
       value: `${renewableEnergyPercent}%`,
       sub: "of total consumption",
       link: "/energy",
+      icon: Zap,
+      color: "text-blue-600 dark:text-blue-400",
+      bg: "bg-blue-100 dark:bg-blue-900/30",
     },
     {
       label: "Water Usage",
       value: totalWater > 0 ? `${(totalWater / 1000).toFixed(1)}K L` : "0 L",
       sub: "total consumption",
       link: "/water",
+      icon: Droplet,
+      color: "text-cyan-600 dark:text-cyan-400",
+      bg: "bg-cyan-100 dark:bg-cyan-900/30",
     },
     {
       label: "Waste Tracked",
       value: totalWaste > 0 ? `${(totalWaste / 1000).toFixed(1)}K kg` : "0 kg",
       sub: "total waste logged",
       link: "/waste",
+      icon: Trash2,
+      color: "text-orange-600 dark:text-orange-400",
+      bg: "bg-orange-100 dark:bg-orange-900/30",
     },
   ];
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-8">
       {/* Header */}
-      <div className="flex items-start justify-between">
+      <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
         <div>
-          <h1 className="text-3xl font-bold">Dashboard</h1>
-          <p className="text-gray-600 mt-1">Your sustainability overview</p>
+          <h1 className="text-4xl font-bold text-foreground">Dashboard</h1>
+          <p className="text-muted-foreground mt-2">Your sustainability overview and key metrics</p>
         </div>
         <Button
-          className="bg-green-600 hover:bg-green-700 gap-2"
+          size="lg"
+          className="gap-2"
           onClick={() => router.push("/reports")}
         >
-          <Plus className="h-4 w-4" /> Generate Report
+          <Plus className="h-5 w-5" /> Generate Report
         </Button>
       </div>
 
       {loading && (
-        <div className="text-gray-400 text-sm py-4">
+        <div className="text-muted-foreground text-sm py-8 flex items-center justify-center">
+          <Activity className="h-5 w-5 mr-2 animate-pulse-subtle" />
           Loading dashboard data...
         </div>
       )}
 
       {/* KPI Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-        {kpis.map(({ label, value, sub, link }) => (
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+        {kpis.map(({ label, value, sub, link, icon: KpiIcon, color, bg }) => (
           <Card
             key={label}
-            className="cursor-pointer hover:shadow-md transition-shadow"
+            className="group cursor-pointer hover:shadow-lg hover:border-primary/30 transition-all duration-300 border-border/50"
             onClick={() => router.push(link)}
           >
             <CardHeader className="pb-2">
-              <CardTitle className="text-sm font-medium text-gray-600">
-                {label}
-              </CardTitle>
+              <div className="flex items-center justify-between mb-2">
+                <CardTitle className="text-sm font-semibold text-muted-foreground group-hover:text-foreground transition-colors">
+                  {label}
+                </CardTitle>
+                <div className={`w-10 h-10 rounded-lg ${bg} ${color} flex items-center justify-center group-hover:scale-110 transition-transform`}>
+                  <KpiIcon className="h-5 w-5" />
+                </div>
+              </div>
             </CardHeader>
             <CardContent>
-              <div className="text-3xl font-bold">{value}</div>
-              <p className="text-xs text-gray-500 mt-2">{sub}</p>
+              <div className="text-3xl md:text-4xl font-bold text-foreground">{value}</div>
+              <p className="text-sm text-muted-foreground mt-3">{sub}</p>
             </CardContent>
           </Card>
         ))}
@@ -211,13 +240,19 @@ export default function DashboardPage() {
 
       {/* Charts */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        <Card className="lg:col-span-1">
+        <Card className="lg:col-span-1 border-border/50">
           <CardHeader>
-            <CardTitle>Carbon by Source</CardTitle>
+            <div className="flex items-center justify-between">
+              <div>
+                <CardTitle className="text-xl">Carbon by Source</CardTitle>
+                <CardDescription className="mt-1">Emissions breakdown</CardDescription>
+              </div>
+              <Wind className="h-5 w-5 text-primary opacity-40" />
+            </div>
           </CardHeader>
           <CardContent>
             {carbonBySource.length === 0 ? (
-              <div className="h-[250px] flex items-center justify-center text-gray-400 text-sm">
+              <div className="h-[250px] flex items-center justify-center text-muted-foreground text-sm rounded-lg bg-secondary/20">
                 No emissions data yet
               </div>
             ) : (
@@ -238,6 +273,11 @@ export default function DashboardPage() {
                   </Pie>
                   <Tooltip
                     formatter={(v) => `${(Number(v) / 1000).toFixed(1)}K kg`}
+                    contentStyle={{
+                      backgroundColor: "var(--card)",
+                      border: "1px solid var(--border)",
+                      borderRadius: "0.5rem",
+                    }}
                   />
                 </PieChart>
               </ResponsiveContainer>
@@ -245,31 +285,44 @@ export default function DashboardPage() {
           </CardContent>
         </Card>
 
-        <Card className="lg:col-span-2">
+        <Card className="lg:col-span-2 border-border/50">
           <CardHeader>
-            <CardTitle>Emissions Trend</CardTitle>
-            <CardDescription>
-              Monthly CO₂ emissions (thousands kg)
-            </CardDescription>
+            <div className="flex items-center justify-between">
+              <div>
+                <CardTitle className="text-xl">Emissions Trend</CardTitle>
+                <CardDescription className="mt-1">
+                  Monthly CO₂ emissions tracking
+                </CardDescription>
+              </div>
+              <TrendingUp className="h-5 w-5 text-primary opacity-40" />
+            </div>
           </CardHeader>
           <CardContent>
             {trendData.length === 0 ? (
-              <div className="h-[250px] flex items-center justify-center text-gray-400 text-sm">
+              <div className="h-[250px] flex items-center justify-center text-muted-foreground text-sm rounded-lg bg-secondary/20">
                 No trend data yet
               </div>
             ) : (
               <ResponsiveContainer width="100%" height={250}>
                 <LineChart data={trendData}>
-                  <CartesianGrid strokeDasharray="3 3" />
-                  <XAxis dataKey="month" />
-                  <YAxis />
-                  <Tooltip />
+                  <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
+                  <XAxis dataKey="month" stroke="var(--muted-foreground)" />
+                  <YAxis stroke="var(--muted-foreground)" />
+                  <Tooltip
+                    contentStyle={{
+                      backgroundColor: "var(--card)",
+                      border: "1px solid var(--border)",
+                      borderRadius: "0.5rem",
+                    }}
+                  />
                   <Legend />
                   <Line
                     type="monotone"
                     dataKey="emissions"
-                    stroke="#10b981"
-                    strokeWidth={2}
+                    stroke="hsl(var(--primary))"
+                    strokeWidth={3}
+                    dot={{ fill: "hsl(var(--primary))", r: 5 }}
+                    activeDot={{ r: 7 }}
                     name="Emissions (K kg)"
                   />
                 </LineChart>
@@ -281,47 +334,57 @@ export default function DashboardPage() {
 
       {/* Goals */}
       {goals.length > 0 && (
-        <Card>
+        <Card className="border-border/50 border-l-4 border-l-primary/50">
           <CardHeader>
-            <CardTitle>Sustainability Goals Progress</CardTitle>
-            <CardDescription>Tracking progress toward targets</CardDescription>
+            <div className="flex items-center justify-between">
+              <div>
+                <CardTitle className="text-xl flex items-center gap-2">
+                  <Goal className="h-5 w-5 text-primary" />
+                  Sustainability Goals Progress
+                </CardTitle>
+                <CardDescription className="mt-1">Tracking progress toward targets</CardDescription>
+              </div>
+            </div>
           </CardHeader>
           <CardContent>
-            <div className="space-y-4">
+            <div className="space-y-6">
               {goals.map((goal) => (
-                <div key={goal.id} className="space-y-2">
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <p className="font-medium">{goal.title}</p>
-                      <p className="text-sm text-gray-600">
-                        Target: {goal.target} {goal.unit}
+                <div key={goal.id} className="space-y-3 pb-4 border-b border-border last:pb-0 last:border-0">
+                  <div className="flex items-start justify-between">
+                    <div className="flex-1">
+                      <p className="font-semibold text-foreground">{goal.title}</p>
+                      <p className="text-sm text-muted-foreground mt-1">
+                        Target: <span className="font-medium">{goal.target} {goal.unit}</span>
                       </p>
                     </div>
-                    <span
-                      className={`text-xs font-semibold px-2 py-1 rounded ${
+                    <Badge
+                      variant={
                         goal.status === "on-track"
-                          ? "bg-green-100 text-green-700"
+                          ? "success"
                           : goal.status === "at-risk"
-                            ? "bg-yellow-100 text-yellow-700"
-                            : "bg-red-100 text-red-700"
-                      }`}
+                            ? "warning"
+                            : "destructive"
+                      }
+                      className="ml-2 flex-shrink-0"
                     >
                       {goal.status === "on-track"
                         ? "On Track"
                         : goal.status === "at-risk"
                           ? "At Risk"
                           : "Behind"}
-                    </span>
+                    </Badge>
                   </div>
-                  <div className="w-full bg-gray-200 rounded-full h-2">
-                    <div
-                      className="bg-green-600 h-2 rounded-full transition-all"
-                      style={{ width: `${Math.min(goal.progress, 100)}%` }}
-                    />
+                  <div className="space-y-2">
+                    <div className="w-full bg-secondary rounded-full h-3 overflow-hidden">
+                      <div
+                        className="h-3 rounded-full transition-all duration-500 bg-gradient-to-r from-primary to-secondary"
+                        style={{ width: `${Math.min(goal.progress, 100)}%` }}
+                      />
+                    </div>
+                    <p className="text-xs text-muted-foreground text-right font-medium">
+                      {goal.progress}% complete
+                    </p>
                   </div>
-                  <p className="text-xs text-gray-500 text-right">
-                    {goal.progress}% complete
-                  </p>
                 </div>
               ))}
             </div>
@@ -336,21 +399,51 @@ export default function DashboardPage() {
             label: "Emission records",
             value: emissions.length,
             link: "/carbon",
+            icon: Wind,
+            color: "text-green-600 dark:text-green-400",
           },
-          { label: "Energy records", value: energy.length, link: "/energy" },
-          { label: "Water records", value: water.length, link: "/water" },
-          { label: "Waste records", value: waste.length, link: "/waste" },
-        ].map(({ label, value, link }) => (
+          {
+            label: "Energy records",
+            value: energy.length,
+            link: "/energy",
+            icon: Zap,
+            color: "text-blue-600 dark:text-blue-400",
+          },
+          {
+            label: "Water records",
+            value: water.length,
+            link: "/water",
+            icon: Droplet,
+            color: "text-cyan-600 dark:text-cyan-400",
+          },
+          {
+            label: "Waste records",
+            value: waste.length,
+            link: "/waste",
+            icon: Trash2,
+            color: "text-orange-600 dark:text-orange-400",
+          },
+        ].map(({ label, value, link, icon: StatIcon, color }) => (
           <div
             key={label}
-            className="border rounded-lg p-4 bg-white cursor-pointer hover:shadow-sm transition-shadow"
+            className="border border-border/50 rounded-lg p-4 bg-card cursor-pointer hover:shadow-md hover:border-primary/30 transition-all duration-300 group"
             onClick={() => router.push(link)}
           >
-            <p className="text-xs text-gray-500">{label}</p>
-            <p className="text-2xl font-bold mt-1">{value}</p>
+            <div className="flex items-center justify-between mb-2">
+              <p className="text-xs font-medium text-muted-foreground group-hover:text-foreground transition-colors">
+                {label}
+              </p>
+              <StatIcon className={`h-4 w-4 ${color} opacity-60 group-hover:opacity-100 transition-opacity`} />
+            </div>
+            <p className="text-3xl font-bold text-foreground">{value}</p>
           </div>
         ))}
       </div>
+
+      {/* New Dashboard Sections */}
+      <RecommendedActionsSection />
+      <AnomalyAlertsSection />
+      <GoalProgressSection />
     </div>
   );
 }

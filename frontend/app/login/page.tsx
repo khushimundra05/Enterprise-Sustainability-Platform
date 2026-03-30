@@ -5,6 +5,11 @@ import { useRouter } from "next/navigation";
 import { login as cognitoLogin, userPool } from "@/lib/auth";
 import { cognitoConfig } from "@/lib/cognito";
 import { CognitoUser, CognitoUserAttribute } from "amazon-cognito-identity-js";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Alert, AlertDescription } from "@/components/ui/alert";
+import { Leaf, Eye, EyeOff, AlertCircle } from "lucide-react";
 
 export default function LoginPage() {
   const router = useRouter();
@@ -138,128 +143,179 @@ export default function LoginPage() {
   }
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gray-100">
-      <form
-        onSubmit={submit}
-        className="bg-white p-8 rounded-xl shadow-md w-96 space-y-4"
-      >
-        <h1 className="text-2xl font-bold text-center">
-          SustainHub {mode === "login" ? "Login" : "Sign Up"}
-        </h1>
-
-        {error && (
-          <p className="text-red-500 text-sm text-center bg-red-50 border border-red-200 rounded p-2">
-            {error}
-          </p>
-        )}
-
-        <input
-          type="email"
-          placeholder="Email"
-          className="w-full border p-3 rounded"
-          value={email}
-          onChange={(e) => setEmail(e.target.value)}
-          required
-        />
-
-        {mode === "signup" && (
-          <input
-            type="text"
-            placeholder="Organization Name"
-            className="w-full border p-3 rounded"
-            value={organization}
-            onChange={(e) => setOrganization(e.target.value)}
-          />
-        )}
-
-        <div className="relative">
-          <input
-            type={showPassword ? "text" : "password"}
-            placeholder="Password"
-            className="w-full border p-3 rounded pr-16"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            required
-          />
-          <button
-            type="button"
-            onClick={() => setShowPassword(!showPassword)}
-            className="absolute right-3 top-3 text-sm text-gray-500"
-          >
-            {showPassword ? "Hide" : "Show"}
-          </button>
+    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-background via-background to-secondary/10 dark:from-background dark:via-background dark:to-primary/5 p-4">
+      <div className="w-full max-w-md">
+        {/* Logo */}
+        <div className="flex items-center justify-center gap-2 mb-8 animate-fade-in">
+          <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-primary text-primary-foreground font-bold shadow-lg">
+            <Leaf className="h-6 w-6" />
+          </div>
+          <span className="text-2xl font-bold bg-gradient-to-r from-primary to-secondary bg-clip-text text-transparent">
+            SustainHub
+          </span>
         </div>
 
-        {showVerification && (
-          <div className="space-y-2">
-            <p className="text-sm text-gray-600">
-              Check your email for a verification code.
-            </p>
-            <input
-              type="text"
-              placeholder="Verification Code"
-              className="w-full border p-3 rounded"
-              value={verificationCode}
-              onChange={(e) => setVerificationCode(e.target.value)}
-            />
-            <button
-              type="button"
-              onClick={handleVerify}
-              disabled={loading}
-              className="w-full bg-blue-600 text-white py-3 rounded hover:bg-blue-700 disabled:opacity-50"
-            >
-              {loading ? "Verifying..." : "Verify Email"}
-            </button>
-          </div>
-        )}
+        <Card className="shadow-xl border-border/50 animate-slide-in-up">
+          <CardHeader className="space-y-2">
+            <CardTitle className="text-2xl">
+              {mode === "login" ? "Welcome Back" : "Create Account"}
+            </CardTitle>
+            <CardDescription>
+              {mode === "login"
+                ? "Sign in to your account"
+                : "Join us in building a sustainable future"}
+            </CardDescription>
+          </CardHeader>
 
-        {!showVerification && (
-          <button
-            type="submit"
-            disabled={loading}
-            className="w-full bg-green-600 text-white py-3 rounded hover:bg-green-700 disabled:opacity-50"
-          >
-            {loading
-              ? mode === "login"
-                ? "Logging in..."
-                : "Creating account..."
-              : mode === "login"
-                ? "Login"
-                : "Create Account"}
-          </button>
-        )}
+          <CardContent>
+            <form onSubmit={submit} className="space-y-4">
+              {error && (
+                <Alert variant="destructive" className="bg-destructive/10 border-destructive/20">
+                  <AlertCircle className="h-4 w-4" />
+                  <AlertDescription className="text-destructive">
+                    {error}
+                  </AlertDescription>
+                </Alert>
+              )}
 
-        {mode === "login" ? (
-          <p className="text-center text-sm">
-            Don't have an account?{" "}
-            <button
-              type="button"
-              className="text-green-600 underline"
-              onClick={() => {
-                setMode("signup");
-                setError("");
-              }}
-            >
-              Sign Up
-            </button>
-          </p>
-        ) : (
-          <p className="text-center text-sm">
-            Already have an account?{" "}
-            <button
-              type="button"
-              className="text-green-600 underline"
-              onClick={() => {
-                setMode("login");
-                setShowVerification(false);
-                setError("");
-              }}
-            >
-              Login
-            </button>
-          </p>
-        )}
-      </form>
+              <div className="space-y-2">
+                <label className="text-sm font-medium text-foreground">Email</label>
+                <Input
+                  type="email"
+                  placeholder="your@email.com"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  required
+                  className="transition-smooth"
+                />
+              </div>
+
+              {mode === "signup" && (
+                <div className="space-y-2">
+                  <label className="text-sm font-medium text-foreground">Organization</label>
+                  <Input
+                    type="text"
+                    placeholder="Your Company Name"
+                    value={organization}
+                    onChange={(e) => setOrganization(e.target.value)}
+                    className="transition-smooth"
+                  />
+                </div>
+              )}
+
+              <div className="space-y-2">
+                <label className="text-sm font-medium text-foreground">Password</label>
+                <div className="relative">
+                  <Input
+                    type={showPassword ? "text" : "password"}
+                    placeholder="••••••••"
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    required
+                    className="pr-10 transition-smooth"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowPassword(!showPassword)}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors"
+                  >
+                    {showPassword ? (
+                      <EyeOff className="h-4 w-4" />
+                    ) : (
+                      <Eye className="h-4 w-4" />
+                    )}
+                  </button>
+                </div>
+              </div>
+
+              {showVerification && (
+                <div className="space-y-2 p-4 rounded-lg bg-secondary/10 border border-secondary/20">
+                  <p className="text-sm text-muted-foreground">
+                    Check your email for a verification code.
+                  </p>
+                  <Input
+                    type="text"
+                    placeholder="000000"
+                    value={verificationCode}
+                    onChange={(e) => setVerificationCode(e.target.value)}
+                    className="transition-smooth"
+                  />
+                  <Button
+                    type="button"
+                    onClick={handleVerify}
+                    disabled={loading}
+                    variant="secondary"
+                    className="w-full"
+                  >
+                    {loading ? "Verifying..." : "Verify Email"}
+                  </Button>
+                </div>
+              )}
+
+              {!showVerification && (
+                <Button
+                  type="submit"
+                  disabled={loading}
+                  size="lg"
+                  className="w-full"
+                >
+                  {loading
+                    ? mode === "login"
+                      ? "Signing in..."
+                      : "Creating account..."
+                    : mode === "login"
+                      ? "Sign In"
+                      : "Create Account"}
+                </Button>
+              )}
+
+              <div className="pt-4 border-t border-border text-center text-sm">
+                {mode === "login" ? (
+                  <p className="text-muted-foreground">
+                    Don&apos;t have an account?{" "}
+                    <button
+                      type="button"
+                      className="text-primary hover:underline font-semibold"
+                      onClick={() => {
+                        setMode("signup");
+                        setError("");
+                      }}
+                    >
+                      Sign Up
+                    </button>
+                  </p>
+                ) : (
+                  <p className="text-muted-foreground">
+                    Already have an account?{" "}
+                    <button
+                      type="button"
+                      className="text-primary hover:underline font-semibold"
+                      onClick={() => {
+                        setMode("login");
+                        setShowVerification(false);
+                        setError("");
+                      }}
+                    >
+                      Sign In
+                    </button>
+                  </p>
+                )}
+              </div>
+            </form>
+          </CardContent>
+        </Card>
+
+        <p className="text-center text-xs text-muted-foreground mt-6">
+          By continuing, you agree to our{" "}
+          <a href="#" className="underline hover:text-foreground transition-colors">
+            Terms of Service
+          </a>{" "}
+          and{" "}
+          <a href="#" className="underline hover:text-foreground transition-colors">
+            Privacy Policy
+          </a>
+        </p>
+      </div>
     </div>
   );
 }

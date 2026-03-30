@@ -90,23 +90,23 @@ export function SidebarNav() {
   return (
     <aside
       className={cn(
-        'border-r bg-white transition-all duration-300',
+        'border-r border-border bg-sidebar dark:bg-sidebar transition-all duration-300 flex flex-col h-screen',
         expanded ? 'w-64' : 'w-20',
       )}
     >
-      <div className="flex h-16 items-center justify-between px-4">
-        {expanded && <span className="text-sm font-semibold text-gray-600">MODULES</span>}
+      <div className="flex h-16 items-center justify-between px-4 border-b border-sidebar-border">
+        {expanded && <span className="text-xs font-bold text-sidebar-foreground/60 uppercase tracking-wider">MODULES</span>}
         <Button
           variant="ghost"
           size="icon"
           onClick={() => setExpanded(!expanded)}
-          className="h-8 w-8"
+          className="h-8 w-8 text-sidebar-foreground hover:bg-sidebar-accent"
         >
           <ChevronDown className={cn('h-4 w-4 transition-transform', expanded && 'rotate-180')} />
         </Button>
       </div>
 
-      <nav className="space-y-1 px-2">
+      <nav className="flex-1 space-y-1 px-3 py-4 overflow-y-auto">
         {modules.map((module) => {
           const Icon = module.icon
           const isActive = pathname === module.href
@@ -116,39 +116,41 @@ export function SidebarNav() {
               <Button
                 variant={isActive ? 'default' : 'ghost'}
                 className={cn(
-                  'w-full justify-start gap-3',
-                  isActive && 'bg-green-600 hover:bg-green-700',
+                  'w-full justify-start gap-3 transition-all duration-200',
+                  isActive
+                    ? 'bg-sidebar-primary text-sidebar-primary-foreground shadow-md'
+                    : 'text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground',
                 )}
               >
-                <Icon className="h-4 w-4 flex-shrink-0" />
-                {expanded && <span className="text-sm">{module.label}</span>}
+                <Icon className="h-5 w-5 flex-shrink-0" />
+                {expanded && <span className="text-sm font-medium">{module.label}</span>}
               </Button>
             </Link>
           )
         })}
       </nav>
 
-      <div className="absolute bottom-6 left-0 right-0 border-t px-4 pt-4">
+      <div className="border-t border-sidebar-border px-3 py-4">
         <Collapsible>
           <CollapsibleTrigger asChild>
-            <Button variant="ghost" className="w-full justify-start gap-2">
-              {expanded && <span className="text-xs font-semibold text-gray-600">SETTINGS</span>}
+            <Button variant="ghost" className="w-full justify-start gap-2 text-sidebar-foreground hover:bg-sidebar-accent">
+              {expanded && <span className="text-xs font-bold text-sidebar-foreground/60 uppercase tracking-wider">SETTINGS</span>}
             </Button>
           </CollapsibleTrigger>
           {expanded && (
             <CollapsibleContent className="mt-2 space-y-1">
               <Link href="/settings/organization">
-                <Button variant="ghost" className="w-full justify-start text-xs">
+                <Button variant="ghost" className="w-full justify-start text-xs text-sidebar-foreground hover:bg-sidebar-accent">
                   Organization
                 </Button>
               </Link>
               <Link href="/settings/integrations">
-                <Button variant="ghost" className="w-full justify-start text-xs">
+                <Button variant="ghost" className="w-full justify-start text-xs text-sidebar-foreground hover:bg-sidebar-accent">
                   Integrations
                 </Button>
               </Link>
               <Link href="/settings/team">
-                <Button variant="ghost" className="w-full justify-start text-xs">
+                <Button variant="ghost" className="w-full justify-start text-xs text-sidebar-foreground hover:bg-sidebar-accent">
                   Team Access
                 </Button>
               </Link>
