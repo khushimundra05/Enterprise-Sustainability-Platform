@@ -362,9 +362,13 @@ async function downloadReport(id: string) {
   return requestRaw(`/reports/${id}/download`);
 }
 
+async function deleteReport(id: string) {
+  return request(`/reports/${id}`, { method: "DELETE" });
+}
+
 /* =========================
    ALERTS
-========================= */
+   ========================= */
 
 async function getAlerts(): Promise<AlertRecord[]> {
   return request("/alerts");
@@ -428,6 +432,7 @@ export default {
   generateReport,
   exportReports,
   downloadReport,
+  deleteReport,
   getAlerts,
   checkAnomalies,
   updateAlert,

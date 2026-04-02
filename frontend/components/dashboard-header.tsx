@@ -77,7 +77,7 @@ export function DashboardHeader() {
             <Button
               variant="ghost"
               size="icon"
-              onClick={() => router.push("/settings/organisation")}
+              onClick={() => router.push("/settings/organization")}
               title="Settings"
             >
               <Settings className="h-4 w-4" />
@@ -111,10 +111,10 @@ export function DashboardHeader() {
                 <DropdownMenuSeparator />
                 <DropdownMenuItem onClick={() => setShowProfile(true)}>
                   <User className="mr-2 h-4 w-4" />
-                  Profile Settings
+                  View Profile
                 </DropdownMenuItem>
                 <DropdownMenuItem
-                  onClick={() => router.push("/settings/organisation")}
+                  onClick={() => router.push("/settings/organization")}
                 >
                   <Settings className="mr-2 h-4 w-4" />
                   Organization Settings
@@ -138,7 +138,7 @@ export function DashboardHeader() {
         <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 backdrop-blur-sm animate-fade-in">
           <div className="bg-card rounded-xl shadow-xl w-full max-w-md p-6 space-y-4 text-card-foreground border border-border animate-slide-in-up">
             <div className="flex items-center justify-between">
-              <h2 className="text-lg font-semibold">Profile Settings</h2>
+              <h2 className="text-lg font-semibold">View Profile</h2>
               <button 
                 onClick={() => setShowProfile(false)}
                 className="text-muted-foreground hover:text-foreground transition-smooth"

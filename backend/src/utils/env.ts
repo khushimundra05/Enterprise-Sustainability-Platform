@@ -36,7 +36,7 @@ export const COGNITO = {
 export const AI = {
   OPENAI_API_KEY: process.env.OPENAI_API_KEY || "",
   // Optional: override model names without code changes
-  OPENAI_MODEL: process.env.OPENAI_MODEL || "gpt-4.1-mini",
+  OPENAI_MODEL: process.env.OPENAI_MODEL || "gpt-4o-mini",
   // Optional: external ML service for anomaly detection (HTTP endpoint)
   ANOMALY_MODEL_URL: process.env.ANOMALY_MODEL_URL || "",
 };

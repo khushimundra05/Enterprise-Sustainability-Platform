@@ -28,6 +28,11 @@ import { getAllEnergy } from "../services/energyService";
 import { getAllWater } from "../services/waterService";
 import { getAllWaste } from "../services/wasteService";
 
+// 🔥 SNS IMPORT
+import { SNSClient, PublishCommand } from "@aws-sdk/client-sns";
+
+const sns = new SNSClient({ region: "ap-south-1" });
+
 export const getAlerts: APIGatewayProxyHandler = async (event) => {
   try {
     const userId = getUserId(event);
@@ -56,17 +61,55 @@ export const checkAnomalies: APIGatewayProxyHandler = async (event) => {
       water,
       waste,
     });
+
+    const existing = await getAllAlerts(userId);
+    const active = existing.filter((a) => a.status !== "resolved");
+
+    const candidateTypes = new Set(candidates.map((c) => c.type));
+
+    // Resolve old alerts that are no longer anomalies
+    for (const a of active) {
+      if (!candidateTypes.has(a.type)) {
+        await updateAlertStatus(a.id!, userId, "resolved");
+      }
+    }
+
+    const activeTypes = new Set(active.map((a) => a.type));
+    const toCreate = candidates.filter((c) => !activeTypes.has(c.type));
+
+    // 🚀 CREATE ALERTS + SEND SNS EMAIL
     const createdAlerts = await Promise.all(
-      candidates.map((a) =>
-        createAlert(userId, {
+      toCreate.map(async (a) => {
+        const alert = await createAlert(userId, {
           type: a.type,
           title: a.title,
           description: a.description,
           severity: a.severity,
           affectedArea: a.affectedArea,
           status: a.status,
-        }),
-      ),
+        });
+
+        // 🔔 SNS EMAIL TRIGGER
+        await sns.send(
+          new PublishCommand({
+            TopicArn: process.env.SNS_TOPIC_ARN!,
+            Subject: "🚨 Sustainability Alert",
+            Message: `
+New anomaly detected!
+
+Type: ${a.type}
+Severity: ${a.severity}
+Area: ${a.affectedArea}
+
+${a.description}
+
+Please review immediately.
+            `,
+          }),
+        );
+
+        return alert;
+      }),
     );
 
     return created({ created: createdAlerts.length, alerts: createdAlerts });

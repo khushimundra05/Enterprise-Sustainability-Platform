@@ -18,8 +18,18 @@ provider:
             - dynamodb:UpdateItem
             - dynamodb:DeleteItem
             - dynamodb:Query
-          Resource: "*"
-          # Note: Scan is intentionally removed — we use Query with userId partition key everywhere
+          Resource: "arn:aws:dynamodb:ap-south-1:755631019410:table/*"
+
+        - Effect: Allow
+          Action:
+            - s3:PutObject
+            - s3:GetObject
+          Resource: arn:aws:s3:::sustainhub-reports/*
+
+        - Effect: Allow
+          Action:
+            - sns:Publish
+          Resource: arn:aws:sns:ap-south-1:755631019410:sustainhub-alerts
 
   environment:
     EMISSIONS_TABLE: EmissionsTable
@@ -37,26 +47,17 @@ provider:
     OPENAI_API_KEY: ${env:OPENAI_API_KEY, ""}
     OPENAI_MODEL: ${env:OPENAI_MODEL, "gpt-4.1-mini"}
     ANOMALY_MODEL_URL: ${env:ANOMALY_MODEL_URL, ""}
-    COGNITO_USER_POOL_ID: ${env:COGNITO_USER_POOL_ID, ""}
-    COGNITO_CLIENT_ID: ${env:COGNITO_CLIENT_ID, ""}
+    COGNITO_USER_POOL_ID: ap-south-1_BoZTplkeB
+    COGNITO_CLIENT_ID: shrrsv0l5e490fdi3atps987t
+    S3_BUCKET: sustainhub-reports
+    SNS_TOPIC_ARN: arn:aws:sns:ap-south-1:755631019410:sustainhub-alerts
 
-# ─────────────────────────────────────────────
-# Esbuild configuration
-# ─────────────────────────────────────────────
 build:
   esbuild:
     bundle: true
     minify: false
     external:
       - pdfkit
-
-# ─────────────────────────────────────────────
-# Cognito authorizer — attach to every protected route
-# ─────────────────────────────────────────────
-# In production, API Gateway verifies the JWT and injects claims
-# into event.requestContext.authorizer.claims automatically.
-# serverless-offline skips verification locally (claims won't be set),
-# so getUserId.ts falls back to manual JWT decode.
 
 functions:
   health:
@@ -66,9 +67,7 @@ functions:
           path: health
           method: get
           cors: true
-          # health is intentionally public — no authorizer
 
-  # ── Emissions ──────────────────────────────
   getEmissions:
     handler: src/handlers/emissions.getEmissions
     events:
@@ -102,7 +101,6 @@ functions:
             type: COGNITO_USER_POOLS
             authorizerId: !Ref CognitoAuthorizer
 
-  # ── Energy ─────────────────────────────────
   getEnergy:
     handler: src/handlers/energy.getEnergy
     events:
@@ -136,7 +134,6 @@ functions:
             type: COGNITO_USER_POOLS
             authorizerId: !Ref CognitoAuthorizer
 
-  # ── Water ──────────────────────────────────
   getWater:
     handler: src/handlers/water.getWater
     events:
@@ -170,7 +167,6 @@ functions:
             type: COGNITO_USER_POOLS
             authorizerId: !Ref CognitoAuthorizer
 
-  # ── Waste ──────────────────────────────────
   getWaste:
     handler: src/handlers/waste.getWaste
     events:
@@ -204,7 +200,6 @@ functions:
             type: COGNITO_USER_POOLS
             authorizerId: !Ref CognitoAuthorizer
 
-  # ── Suppliers ──────────────────────────────
   getSuppliers:
     handler: src/handlers/suppliers.getSuppliers
     events:
@@ -260,7 +255,6 @@ functions:
             type: COGNITO_USER_POOLS
             authorizerId: !Ref CognitoAuthorizer
 
-  # ── Compliance ─────────────────────────────
   getCompliance:
     handler: src/handlers/compliance.getCompliance
     events:
@@ -305,7 +299,7 @@ functions:
             type: COGNITO_USER_POOLS
             authorizerId: !Ref CognitoAuthorizer
 
-  getRecommendations:
+  getComplianceRecommendations:
     handler: src/handlers/compliance.getRecommendations
     events:
       - http:
@@ -316,7 +310,6 @@ functions:
             type: COGNITO_USER_POOLS
             authorizerId: !Ref CognitoAuthorizer
 
-  # ── Goals ──────────────────────────────────
   getGoals:
     handler: src/handlers/goals.getGoals
     events:
@@ -383,7 +376,6 @@ functions:
             type: COGNITO_USER_POOLS
             authorizerId: !Ref CognitoAuthorizer
 
-  # ── Teams ──────────────────────────────────
   getTeams:
     handler: src/handlers/teams.getTeams
     events:
@@ -450,7 +442,6 @@ functions:
             type: COGNITO_USER_POOLS
             authorizerId: !Ref CognitoAuthorizer
 
-  # ── Reports ────────────────────────────────
   getReports:
     handler: src/handlers/reports.getReports
     events:
@@ -517,7 +508,6 @@ functions:
             type: COGNITO_USER_POOLS
             authorizerId: !Ref CognitoAuthorizer
 
-  # ── Alerts ─────────────────────────────────
   getAlerts:
     handler: src/handlers/alerts.getAlerts
     events:
@@ -551,7 +541,6 @@ functions:
             type: COGNITO_USER_POOLS
             authorizerId: !Ref CognitoAuthorizer
 
-  # ── Recommendations ────────────────────────
   getDashboardRecommendations:
     handler: src/handlers/recommendations.getRecommendations
     events:
@@ -566,15 +555,8 @@ functions:
 plugins:
   - serverless-offline
 
-# ─────────────────────────────────────────────
-# Resources
-# All tables now use userId (HASH) + id (RANGE) as keys.
-# This enables QueryCommand per-user without Scan.
-# EnergyTable already had this pattern — the rest are updated to match.
-# ─────────────────────────────────────────────
 resources:
   Resources:
-    # Cognito Authorizer resource (referenced by all protected routes above)
     CognitoAuthorizer:
       Type: AWS::ApiGateway::Authorizer
       Properties:
@@ -583,180 +565,4 @@ resources:
         IdentitySource: method.request.header.Authorization
         RestApiId: !Ref ApiGatewayRestApi
         ProviderARNs:
-          - !Sub arn:aws:cognito-idp:${AWS::Region}:${AWS::AccountId}:userpool/${COGNITO_USER_POOL_ID}
-
-    EmissionsTable:
-      Type: AWS::DynamoDB::Table
-      Properties:
-        TableName: ${self:provider.environment.EMISSIONS_TABLE}
-        AttributeDefinitions:
-          - AttributeName: userId
-            AttributeType: S
-          - AttributeName: id
-            AttributeType: S
-        KeySchema:
-          - AttributeName: userId
-            KeyType: HASH
-          - AttributeName: id
-            KeyType: RANGE
-        BillingMode: PAY_PER_REQUEST
-
-    EnergyTable:
-      Type: AWS::DynamoDB::Table
-      Properties:
-        TableName: ${self:provider.environment.ENERGY_TABLE}
-        AttributeDefinitions:
-          - AttributeName: userId
-            AttributeType: S
-          - AttributeName: id
-            AttributeType: S
-        KeySchema:
-          - AttributeName: userId
-            KeyType: HASH
-          - AttributeName: id
-            KeyType: RANGE
-        BillingMode: PAY_PER_REQUEST
-
-    WaterTable:
-      Type: AWS::DynamoDB::Table
-      Properties:
-        TableName: ${self:provider.environment.WATER_TABLE}
-        AttributeDefinitions:
-          - AttributeName: userId
-            AttributeType: S
-          - AttributeName: id
-            AttributeType: S
-        KeySchema:
-          - AttributeName: userId
-            KeyType: HASH
-          - AttributeName: id
-            KeyType: RANGE
-        BillingMode: PAY_PER_REQUEST
-
-    WasteTable:
-      Type: AWS::DynamoDB::Table
-      Properties:
-        TableName: ${self:provider.environment.WASTE_TABLE}
-        AttributeDefinitions:
-          - AttributeName: userId
-            AttributeType: S
-          - AttributeName: id
-            AttributeType: S
-        KeySchema:
-          - AttributeName: userId
-            KeyType: HASH
-          - AttributeName: id
-            KeyType: RANGE
-        BillingMode: PAY_PER_REQUEST
-
-    SuppliersTable:
-      Type: AWS::DynamoDB::Table
-      Properties:
-        TableName: ${self:provider.environment.SUPPLIERS_TABLE}
-        AttributeDefinitions:
-          - AttributeName: userId
-            AttributeType: S
-          - AttributeName: id
-            AttributeType: S
-        KeySchema:
-          - AttributeName: userId
-            KeyType: HASH
-          - AttributeName: id
-            KeyType: RANGE
-        BillingMode: PAY_PER_REQUEST
-
-    ComplianceTable:
-      Type: AWS::DynamoDB::Table
-      Properties:
-        TableName: ${self:provider.environment.COMPLIANCE_TABLE}
-        AttributeDefinitions:
-          - AttributeName: userId
-            AttributeType: S
-          - AttributeName: id
-            AttributeType: S
-        KeySchema:
-          - AttributeName: userId
-            KeyType: HASH
-          - AttributeName: id
-            KeyType: RANGE
-        BillingMode: PAY_PER_REQUEST
-
-    GoalsTable:
-      Type: AWS::DynamoDB::Table
-      Properties:
-        TableName: ${self:provider.environment.GOALS_TABLE}
-        AttributeDefinitions:
-          - AttributeName: userId
-            AttributeType: S
-          - AttributeName: id
-            AttributeType: S
-        KeySchema:
-          - AttributeName: userId
-            KeyType: HASH
-          - AttributeName: id
-            KeyType: RANGE
-        BillingMode: PAY_PER_REQUEST
-
-    TeamsTable:
-      Type: AWS::DynamoDB::Table
-      Properties:
-        TableName: ${self:provider.environment.TEAMS_TABLE}
-        AttributeDefinitions:
-          - AttributeName: userId
-            AttributeType: S
-          - AttributeName: id
-            AttributeType: S
-        KeySchema:
-          - AttributeName: userId
-            KeyType: HASH
-          - AttributeName: id
-            KeyType: RANGE
-        BillingMode: PAY_PER_REQUEST
-
-    ReportsTable:
-      Type: AWS::DynamoDB::Table
-      Properties:
-        TableName: ${self:provider.environment.REPORTS_TABLE}
-        AttributeDefinitions:
-          - AttributeName: userId
-            AttributeType: S
-          - AttributeName: id
-            AttributeType: S
-        KeySchema:
-          - AttributeName: userId
-            KeyType: HASH
-          - AttributeName: id
-            KeyType: RANGE
-        BillingMode: PAY_PER_REQUEST
-
-    AlertsTable:
-      Type: AWS::DynamoDB::Table
-      Properties:
-        TableName: ${self:provider.environment.ALERTS_TABLE}
-        AttributeDefinitions:
-          - AttributeName: userId
-            AttributeType: S
-          - AttributeName: id
-            AttributeType: S
-        KeySchema:
-          - AttributeName: userId
-            KeyType: HASH
-          - AttributeName: id
-            KeyType: RANGE
-        BillingMode: PAY_PER_REQUEST
-
-    RecommendationsTable:
-      Type: AWS::DynamoDB::Table
-      Properties:
-        TableName: ${self:provider.environment.RECOMMENDATIONS_TABLE}
-        AttributeDefinitions:
-          - AttributeName: userId
-            AttributeType: S
-          - AttributeName: id
-            AttributeType: S
-        KeySchema:
-          - AttributeName: userId
-            KeyType: HASH
-          - AttributeName: id
-            KeyType: RANGE
-        BillingMode: PAY_PER_REQUEST
+          - arn:aws:cognito-idp:ap-south-1:755631019410:userpool/ap-south-1_BoZTplkeB
